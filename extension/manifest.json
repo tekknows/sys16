@@ -3,15 +3,23 @@
   "name": "MINDLOCK Employee Console",
   "version": "1.0.0",
   "description": "Company productivity and support extension for managed laptops.",
-  "permissions": ["storage", "tabs", "webRequest", "declarativeNetRequestWithHostAccess", "scripting"],
+  "permissions": ["storage", "tabs", "declarativeNetRequestWithHostAccess", "scripting", "alarms", "notifications"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_title": "MINDLOCK",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon128.png"
   },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [{
+    "resources": ["blocked.html"],
+    "matches": ["<all_urls>"]
+  }],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }

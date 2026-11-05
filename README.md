@@ -8,11 +8,12 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - `extension/` — Chrome/Edge extension manifest and popup UI
 - `supabase/migrations/001_initial_schema.sql` — PostgreSQL schema and RLS starter logic
 - `supabase/migrations/002_employee_user_id.sql` — employee user IDs and active assignment constraints
+- `supabase/migrations/003_ticket_conversations.sql` — ticket workflow, messages, attachments, privacy policies, and realtime
 
 ## Quick start
 
-1. Copy the Supabase credentials into a secure config before deploying.
-2. Start a local static web server:
+1. Configure the Supabase project as described below.
+2. Start a local static web server from the repository root:
    - `python -m http.server 8000`
 3. Open `http://localhost:8000/admin/index.html` to use the admin app.
 4. Load the extension from `extension/` in Chrome with Developer mode enabled.
@@ -22,9 +23,17 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - Create a Supabase project.
 - Run the SQL in `supabase/migrations/001_initial_schema.sql`.
 - For an existing installation, run `supabase/migrations/002_employee_user_id.sql` after the initial schema.
-- Set up the initial admin user through Supabase Auth Admin, not by inserting into auth tables manually.
-- Use `sys@admin.com` / `admin123` only as a development bootstrap credential; the user must change the password after first login.
+- Run `supabase/migrations/003_ticket_conversations.sql` after the first two migrations.
+- Set up employee, IT staff, and administrator accounts with Supabase Auth and matching rows in `profiles`, `employees`, and `user_roles`. Do not insert users directly into Supabase's `auth` tables.
+- Deactivate users with ticket history instead of deleting their profiles; the conversation migration restricts deletion so ticket records and sender history are retained.
+- Add the project URL and public anon key to both `admin/config.js` and `extension/config.js`. Never put a Supabase service-role key in the dashboard or extension.
+- Enable the extension for incognito use in the browser's extension settings if the organization's policy requires blocking there; browsers do not allow an extension to silently enable itself in incognito.
+- Apply and verify your Supabase Auth, Storage, and Realtime settings before deployment. Ticket attachments use the private `ticket-attachments` bucket created by migration 003.
 
 ## Notes
 
-This repository intentionally provides a working front-end scaffold and database schema with realistic structure and logic. In production, replace demo data and extension blocking logic with your Supabase project-specific credentials and server-side policies.
+Tickets and messages are stored in Supabase and protected by row-level security. Employees can only access their own tickets; internal IT notes are restricted to support staff. The admin ticket screen uses Supabase Realtime with polling as a fallback, and the extension checks for replies and status changes while its background worker is running.
+
+The extension's website-blocking list is currently a local starter policy in `extension/background.js`; replace it with organization-approved, authenticated policy synchronization before managing production devices. Keep credentials, retention rules, and access policies specific to your deployment.
+
+Non-ticket employee, laptop, and scheduling screens remain UI scaffolding with starter data; configure their production data workflows separately.

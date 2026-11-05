@@ -9,12 +9,17 @@
   <body class="dashboard-page">
     <div class="app-shell">
       <aside class="sidebar" id="sidebar">
-        <div class="brand-block">
-          <div class="brand-mark">M</div>
-          <div>
-            <span class="eyebrow">Admin Portal</span>
-            <h1>MINDLOCK</h1>
+        <div class="sidebar-header">
+          <div class="brand-block">
+            <div class="brand-mark">M</div>
+            <div>
+              <span class="eyebrow">Admin Portal</span>
+              <h1>MINDLOCK</h1>
+            </div>
           </div>
+          <button class="sidebar-toggle" id="sidebarToggleBtn" aria-label="Minimize navigation" aria-expanded="true" title="Minimize navigation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+          </button>
         </div>
 
         <nav class="sidebar-nav" aria-label="Sidebar navigation">
@@ -30,6 +35,9 @@
         </nav>
 
         <div class="sidebar-meta">
+          <button class="nav-link version-link" id="versionButton" aria-label="System version 1.0.0; open update logs">
+            <span>System version</span><span class="version-tag">v1.0.0</span>
+          </button>
           <button class="secondary-btn small-btn" id="logoutBtn">Logout</button>
         </div>
       </aside>
@@ -42,10 +50,12 @@
           </div>
 
           <div class="topbar-actions">
-            <button class="secondary-btn small-btn" id="sidebarToggleBtn" aria-label="Minimize navigation" aria-expanded="true">☰</button>
-            <button class="secondary-btn small-btn" id="refreshBtn">Refresh</button>
-            <button class="secondary-btn small-btn" id="updateLogsBtn">Update logs · v1.0.0</button>
-            <button class="secondary-btn small-btn" id="themeToggleBtn">Dark mode</button>
+            <button class="secondary-btn small-btn" id="syncSystemBtn"><span class="sync-icon" aria-hidden="true">⟳</span> Sync system</button>
+            <span class="sync-status" id="syncStatus" role="status">Last sync: Not yet synced</span>
+            <button class="icon-btn theme-toggle" id="themeToggleBtn" aria-label="Switch to dark mode" title="Switch to dark mode">
+              <svg class="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path></svg>
+              <svg class="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 15.4A8.5 8.5 0 0 1 8.6 3.6 8.7 8.7 0 1 0 20.4 15.4Z"></path></svg>
+            </button>
           </div>
         </header>
 
@@ -91,15 +101,18 @@
 
         <section id="analytics" class="module-panel">
           <div class="stats-grid" id="analyticsStats"></div>
-          <div class="content-grid two-col">
-            <div class="panel-card">
-              <div class="card-header"><h3>Website usage trends</h3><span class="pill success">This week</span></div>
-              <div class="bar-chart" id="analyticsChart"></div>
+          <div class="panel-card">
+            <div class="card-header">
+              <div><h3 id="analyticsChartTitle">Website time spent</h3><p class="panel-subtitle">Choose a view to compare managed browsing activity.</p></div>
+              <div class="analytics-tabs" role="tablist" aria-label="Analytics metric">
+                <button class="analytics-tab active" role="tab" aria-selected="true" data-analytics-tab="time">Time spent</button>
+                <button class="analytics-tab" role="tab" aria-selected="false" data-analytics-tab="data">Data usage (MB)</button>
+                <button class="analytics-tab" role="tab" aria-selected="false" data-analytics-tab="sites">Top websites</button>
+              </div>
             </div>
-            <div class="panel-card">
-              <div class="card-header"><h3>Most visited websites</h3></div>
-              <ul class="activity-list" id="topSitesList"></ul>
-            </div>
+            <p class="analytics-state" id="analyticsState" role="status">Configure Supabase to load analytics from device usage records.</p>
+            <div class="analytics-chart" id="analyticsChart" aria-label="Website usage chart"></div>
+            <ul class="activity-list analytics-site-list hidden" id="topSitesList"></ul>
           </div>
         </section>
 
@@ -196,12 +209,12 @@
               </label>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Assign laptop</button>
-                <button type="button" class="secondary-btn">Reassign history</button>
+                <button type="button" class="secondary-btn" id="reassignHistoryBtn">Reassign history</button>
               </div>
             </form>
           </div>
 
-          <div class="panel-card">
+          <div class="panel-card" id="assignmentHistoryCard">
             <div class="card-header">
               <h3>Assignment history</h3>
             </div>
@@ -304,16 +317,19 @@
         </section>
 
         <section id="tickets" class="module-panel">
-          <div class="panel-card">
+          <div id="ticketListView" class="panel-card">
             <div class="card-header">
-              <h3>Support tickets</h3>
+              <div><h3>All tickets</h3><p class="panel-subtitle">Search, filter, and open a ticket to view its conversation.</p></div>
             </div>
             <div class="filter-row">
-              <input id="ticketSearch" type="search" class="search-input" placeholder="Search ticket ID or employee" />
+              <input id="ticketSearch" type="search" class="search-input" placeholder="Search ticket ID or subject" />
               <select id="ticketStatusFilter" aria-label="Filter tickets by status">
                 <option value="">All statuses</option>
                 <option>Open</option>
+                <option>Assigned</option>
                 <option>In Progress</option>
+                <option>Waiting for Employee</option>
+                <option>Waiting for IT</option>
                 <option>Resolved</option>
                 <option>Closed</option>
               </select>
@@ -329,13 +345,73 @@
                 <tr>
                   <th>Ticket</th>
                   <th>Employee</th>
+                  <th>Subject</th>
                   <th>Category</th>
+                  <th>Priority</th>
+                  <th>Assigned IT staff</th>
                   <th>Status</th>
-                  <th>Updated</th>
+                  <th>Date submitted</th>
+                  <th>Last updated</th>
                 </tr>
               </thead>
               <tbody id="ticketTable"></tbody>
             </table>
+            <div class="ticket-list-footer">
+              <span id="ticketPageLabel" class="panel-subtitle">Waiting for ticket data</span>
+              <div class="actions-row">
+                <button id="ticketPagePrev" type="button" class="secondary-btn small-btn" disabled>Previous</button>
+                <button id="ticketPageNext" type="button" class="secondary-btn small-btn" disabled>Next</button>
+              </div>
+            </div>
+            <p class="ticket-state" id="ticketListState" role="status">Configure Supabase to load tickets.</p>
+          </div>
+
+          <div id="ticketDetailView" class="hidden">
+            <div class="ticket-detail-toolbar">
+              <button type="button" class="secondary-btn small-btn" id="backToTicketsBtn">← Back to All Tickets</button>
+              <span id="ticketDetailState" class="panel-subtitle" role="status"></span>
+            </div>
+            <div class="ticket-detail-grid">
+              <section class="panel-card ticket-info-card">
+                <div class="card-header"><div><p class="eyebrow">Ticket details</p><h3 id="ticketDetailNumber">Ticket</h3></div><span id="ticketUnreadBadge" class="pill warning hidden">Unread employee message</span></div>
+                <dl class="ticket-info-list" id="ticketInfoList"></dl>
+                <label class="ticket-status-field"><span>Status</span>
+                  <select id="ticketDetailStatus">
+                    <option>Open</option><option>Assigned</option><option>In Progress</option><option>Waiting for Employee</option><option>Waiting for IT</option><option>Resolved</option><option>Closed</option>
+                  </select>
+                </label>
+                <button type="button" class="primary-btn" id="saveTicketStatusBtn">Update status</button>
+                <label class="ticket-status-field"><span>Assigned IT staff</span>
+                  <select id="ticketAssignedStaff"><option value="">Unassigned</option></select>
+                </label>
+                <button type="button" class="secondary-btn" id="assignTicketBtn">Save assignment</button>
+                <div class="internal-notes">
+                  <h4>Assignment history</h4>
+                  <ul id="ticketAssignmentHistory" class="message-list"></ul>
+                </div>
+                <div class="internal-notes">
+                  <h4>Internal IT notes</h4>
+                  <p class="panel-subtitle">Only authorized IT staff and administrators can view these notes.</p>
+                  <ul id="internalNotesList" class="message-list"></ul>
+                  <form id="internalNoteForm" class="message-form">
+                    <textarea id="internalNoteInput" rows="2" placeholder="Add a private note…" required></textarea>
+                    <button class="secondary-btn" type="submit">Add note</button>
+                  </form>
+                </div>
+              </section>
+              <section class="panel-card conversation-card">
+                <div class="card-header"><div><p class="eyebrow">Employee and IT</p><h3>Conversation</h3></div><span id="conversationConnection" class="pill neutral">Connecting…</span></div>
+                <p id="conversationState" class="ticket-state" role="status">Loading conversation…</p>
+                <div id="conversationMessages" class="conversation-messages" aria-live="polite"></div>
+                <form id="ticketReplyForm" class="message-form">
+                  <textarea id="ticketReplyInput" rows="3" placeholder="Write a reply…" required></textarea>
+                  <div class="message-form-footer">
+                    <label class="attachment-field">Attach file <input id="ticketAttachmentInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" /></label>
+                    <button class="primary-btn" id="sendTicketReplyBtn" type="submit">Send reply</button>
+                  </div>
+                </form>
+              </section>
+            </div>
           </div>
         </section>
 
@@ -466,6 +542,8 @@
       </section>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -12,15 +12,35 @@
         <p class="eyebrow">Company laptop</p>
         <h1>MINDLOCK</h1>
       </div>
-      <span id="themeIndicator" class="theme-pill">Light</span>
+      <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch extension theme" title="Switch extension theme">☾</button>
     </header>
 
+    <section id="extensionLoginView" class="card-block">
+      <h2>Employee sign in</h2>
+      <p class="muted-copy">Sign in with your company account to view tickets and contact IT.</p>
+      <form id="extensionLoginForm" class="stack-form">
+        <label><span>Email</span><input id="extensionEmail" type="email" autocomplete="username" required /></label>
+        <label><span>Password</span><input id="extensionPassword" type="password" autocomplete="current-password" required /></label>
+        <button type="submit" class="primary-btn">Sign in</button>
+        <p id="extensionLoginState" class="inline-state" role="status"></p>
+      </form>
+    </section>
+
+    <div id="extensionApp" class="hidden">
+      <nav class="extension-nav" aria-label="Extension sections">
+        <button class="extension-tab active" data-view="homeView">Home</button>
+        <button class="extension-tab" data-view="myTicketsView">My tickets</button>
+        <button class="extension-tab" data-view="reportView">Report issue</button>
+        <button class="extension-tab logout-tab" id="extensionLogoutBtn">Sign out</button>
+      </nav>
+
+    <section id="homeView" class="extension-view active">
     <section class="overview-card">
       <div class="user-row">
         <div class="avatar">SP</div>
         <div>
-          <strong id="userName">Selena Park</strong>
-          <small id="employeeMeta">Employee • ML-209</small>
+          <strong id="userName">Employee</strong>
+          <small id="employeeMeta">Company device</small>
         </div>
       </div>
       <div class="summary-grid">
@@ -37,6 +57,7 @@
 
     <section class="card-block">
       <h2>Current blocking policy</h2>
+      <p class="muted-copy" id="blockingPolicyState">Policy details will appear after the device sync is connected.</p>
       <ul id="blockedList" class="list-items"></ul>
     </section>
 
@@ -45,15 +66,38 @@
       <div class="usage-row">
         <div>
           <span>Today</span>
-          <strong>3h 14m</strong>
+          <strong id="todayUsage">—</strong>
         </div>
         <div>
           <span>Most visited</span>
-          <strong>GitHub</strong>
+          <strong id="mostVisitedSite">—</strong>
         </div>
       </div>
     </section>
 
+    </section>
+
+    <section id="myTicketsView" class="extension-view">
+      <section class="card-block">
+        <div class="section-title-row"><h2>My tickets</h2><button type="button" class="text-btn" id="reloadMyTicketsBtn">Sync</button></div>
+        <p class="inline-state" id="myTicketsState" role="status">Sign in to load your tickets.</p>
+        <ul id="myTicketsList" class="ticket-list"></ul>
+      </section>
+      <section id="employeeTicketDetail" class="card-block hidden">
+        <button id="employeeTicketBackBtn" class="text-btn" type="button">← Back to my tickets</button>
+        <div id="employeeTicketInfo"></div>
+        <div class="conversation-messages extension-conversation" id="employeeConversation" aria-live="polite"></div>
+        <p class="inline-state" id="employeeConversationState" role="status"></p>
+        <form id="employeeReplyForm" class="stack-form">
+          <textarea id="employeeReplyInput" rows="3" placeholder="Write a reply…" required></textarea>
+          <label class="attachment-field">Attach file <input id="employeeReplyFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" /></label>
+          <button type="submit" class="primary-btn" id="employeeReplyBtn">Send reply</button>
+        </form>
+        <button type="button" class="secondary-btn hidden" id="reopenTicketBtn">Reopen resolved ticket</button>
+      </section>
+    </section>
+
+    <section id="reportView" class="extension-view">
     <section class="card-block">
       <h2>Report issue</h2>
       <form id="issueForm">
@@ -64,20 +108,28 @@
             <option>Website Blocking Issue</option>
             <option>Laptop Hardware Problem</option>
             <option>Internet Connection</option>
+            <option>Account and Login</option>
+            <option>Software Installation</option>
+            <option>Other Technical Issue</option>
           </select>
         </label>
         <label>
           <span>Subject</span>
-          <input type="text" value="Extension not syncing" />
+          <input id="issueSubject" type="text" maxlength="160" required />
         </label>
         <label>
           <span>Description</span>
-          <textarea rows="3">The extension stopped updating the policy after a restart.</textarea>
+          <textarea id="issueDescription" rows="3" maxlength="5000" required></textarea>
         </label>
+        <label class="attachment-field">Optional attachment <input id="issueAttachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" /></label>
         <button type="submit" class="primary-btn">Submit ticket</button>
+        <p id="issueSubmitState" class="inline-state" role="status"></p>
       </form>
     </section>
+    </section>
+    </div>
 
+    <script src="config.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

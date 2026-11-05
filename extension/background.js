@@ -1,35 +1,114 @@
+importScripts('config.js');
+
 const defaultBlockedDomains = ['facebook.com', 'twitter.com', 'youtube.com', 'reddit.com', 'instagram.com'];
+const blockRuleIdStart = 1001;
 
-function normalizeDomain(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname.replace(/^www\./, '').toLowerCase();
-  } catch (error) {
-    return '';
+async function syncBlockingRules() {
+  const stored = await chrome.storage.local.get(['mindlock-blocked-domains', 'mindlock-blocking-enabled']);
+  const domains = stored['mindlock-blocked-domains']?.length ? stored['mindlock-blocked-domains'] : defaultBlockedDomains;
+  const rules = await chrome.declarativeNetRequest.getDynamicRules();
+  const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
+  const addRules = stored['mindlock-blocking-enabled'] === false ? [] : [...new Set(domains)]
+    .map((domain) => String(domain).trim().toLowerCase().replace(/^www\./, ''))
+    .filter((domain) => /^[a-z0-9.-]+$/.test(domain) && domain.includes('.'))
+    .slice(0, 100)
+    .map((domain, index) => ({
+      id: blockRuleIdStart + index,
+      priority: 1,
+      action: { type: 'redirect', redirect: { extensionPath: '/blocked.html' } },
+      condition: { requestDomains: [domain], resourceTypes: ['main_frame'] },
+    }));
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: managedRules.map((rule) => rule.id),
+    addRules,
+  });
+}
+
+const extensionSessionKey = 'mindlock-extension-session';
+const notifiedRepliesKey = 'mindlock-notified-replies';
+const notifiedStatusesKey = 'mindlock-notified-ticket-statuses';
+const ticketCheckAlarm = 'mindlock-ticket-reply-check';
+
+chrome.runtime.onInstalled.addListener(() => chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 }));
+chrome.runtime.onStartup.addListener(() => chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 }));
+chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
+chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes['mindlock-blocked-domains'] || changes['mindlock-blocking-enabled'])) {
+    syncBlockingRules().catch((error) => console.error('Unable to update website blocking rules:', error));
   }
-}
-
-function isBlockedDomain(hostname) {
-  const rules = JSON.parse(localStorage.getItem('mindlock-blocked-domains') || 'null') || defaultBlockedDomains;
-  return rules.some((entry) => hostname === entry || hostname.endsWith('.' + entry));
-}
-
-chrome.storage.local.get(['mindlock-blocked-domains'], (result) => {
-  const stored = result['mindlock-blocked-domains'];
-  const activeDomains = stored && stored.length ? stored : defaultBlockedDomains;
-  localStorage.setItem('mindlock-blocked-domains', JSON.stringify(activeDomains));
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ticketCheckAlarm) checkForTicketReplies();
 });
 
-chrome.webRequest.onBeforeRequest.addListener(
-  (details) => {
-    const host = normalizeDomain(details.url);
-    if (!host || !isBlockedDomain(host)) {
-      return {};
-    }
+async function getValidExtensionSession() {
+  const stored = await chrome.storage.local.get(extensionSessionKey);
+  let session = stored[extensionSessionKey];
+  if (!session || !globalThis.MINDLOCK_CONFIG?.supabaseUrl || !globalThis.MINDLOCK_CONFIG?.supabaseAnonKey) return null;
+  if (session.expires_at * 1000 <= Date.now() + 60000) {
+    const response = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (!response.ok) return null;
+    const refreshed = await response.json();
+    session = { ...refreshed, expires_at: Math.floor(Date.now() / 1000) + refreshed.expires_in };
+    await chrome.storage.local.set({ [extensionSessionKey]: session });
+  }
+  return session;
+}
 
-    const redirectTarget = chrome.runtime.getURL(`blocked.html?domain=${encodeURIComponent(host)}`);
-    return { redirectUrl: redirectTarget };
-  },
-  { urls: ['<all_urls>'] },
-  ['blocking'],
-);
+async function checkForTicketReplies() {
+  try {
+    const session = await getValidExtensionSession();
+    if (!session) return;
+    const response = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/ticket_messages?sender_role=neq.Employee&is_read=eq.false&select=id,ticket_id,message&order=created_at.desc&limit=10`, {
+      headers: {
+        apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+    if (!response.ok) return;
+    const unreadReplies = await response.json();
+    const stored = await chrome.storage.local.get(notifiedRepliesKey);
+    const notified = new Set(stored[notifiedRepliesKey] || []);
+    const newReplies = unreadReplies.filter((reply) => !notified.has(reply.id));
+    for (const reply of newReplies) {
+      chrome.notifications.create(`mindlock-reply-${reply.id}`, {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+        title: 'New MINDLOCK support reply',
+        message: 'IT staff replied to your support ticket.',
+      });
+      notified.add(reply.id);
+    }
+    if (newReplies.length) await chrome.storage.local.set({ [notifiedRepliesKey]: [...notified].slice(-100) });
+
+    const ticketResponse = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/tickets?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id,ticket_number,status&order=updated_at.desc&limit=50`, {
+      headers: {
+        apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
+        Authorization: `******`,
+      },
+    });
+    if (!ticketResponse.ok) throw new Error(`Ticket status check failed (${ticketResponse.status}).`);
+    const tickets = await ticketResponse.json();
+    const statusStorage = await chrome.storage.local.get(notifiedStatusesKey);
+    const knownStatuses = statusStorage[notifiedStatusesKey] || {};
+    for (const ticket of tickets) {
+      if (knownStatuses[ticket.id] && knownStatuses[ticket.id] !== ticket.status) {
+        chrome.notifications.create(`mindlock-status-${ticket.id}`, {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+          title: 'Ticket status updated',
+          message: `${ticket.ticket_number} is now ${ticket.status}.`,
+        });
+      }
+      knownStatuses[ticket.id] = ticket.status;
+    }
+    await chrome.storage.local.set({ [notifiedStatusesKey]: knownStatuses });
+  } catch (error) {
+    console.error('Unable to check for ticket replies:', error);
+  }
+}

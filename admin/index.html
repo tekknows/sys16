@@ -30,7 +30,7 @@
 
         <label class="input-field">
           <span>Email</span>
-          <input id="email" type="email" placeholder="sys@admin.com" required />
+          <input id="email" type="email" placeholder="name@company.com" required />
         </label>
 
         <label class="input-field">
@@ -47,11 +47,12 @@
         </label>
 
         <button type="submit" class="primary-btn">Login</button>
-        <button type="button" class="secondary-btn" id="demoLoginBtn">Use default admin</button>
         <p id="loginError" class="error-text hidden"></p>
       </form>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

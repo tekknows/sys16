@@ -51,18 +51,12 @@
         This website is currently blocked by your company productivity policy.
       </p>
       <p>
-        Blocked domain: <strong id="blockedDomain">unknown</strong>
+        Blocked website: <strong>MINDLOCK policy</strong>
       </p>
       <p>
         Reason: Company-managed schedule or policy restriction is active for this site.
       </p>
     </div>
 
-    <script>
-      const params = new URLSearchParams(window.location.search);
-      const domain = params.get('domain');
-      const target = document.getElementById('blockedDomain');
-      if (target) target.textContent = domain || 'This website';
-    </script>
   </body>
 </html>
