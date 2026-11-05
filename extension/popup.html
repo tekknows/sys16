@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MINDLOCK</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="popup-body">
+    <header class="popup-header">
+      <div>
+        <p class="eyebrow">Company laptop</p>
+        <h1>MINDLOCK</h1>
+      </div>
+      <span id="themeIndicator" class="theme-pill">Light</span>
+    </header>
+
+    <section class="overview-card">
+      <div class="user-row">
+        <div class="avatar">SP</div>
+        <div>
+          <strong id="userName">Selena Park</strong>
+          <small id="employeeMeta">Employee • ML-209</small>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div>
+          <span>Website status</span>
+          <strong id="websiteStatus">Blocked policy active</strong>
+        </div>
+        <div>
+          <span>Incognito policy</span>
+          <strong id="incognitoStatus">Enabled</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="card-block">
+      <h2>Current blocking policy</h2>
+      <ul id="blockedList" class="list-items"></ul>
+    </section>
+
+    <section class="card-block">
+      <h2>Usage summary</h2>
+      <div class="usage-row">
+        <div>
+          <span>Today</span>
+          <strong>3h 14m</strong>
+        </div>
+        <div>
+          <span>Most visited</span>
+          <strong>GitHub</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="card-block">
+      <h2>Report issue</h2>
+      <form id="issueForm">
+        <label>
+          <span>Issue category</span>
+          <select>
+            <option>Browser Extension Issue</option>
+            <option>Website Blocking Issue</option>
+            <option>Laptop Hardware Problem</option>
+            <option>Internet Connection</option>
+          </select>
+        </label>
+        <label>
+          <span>Subject</span>
+          <input type="text" value="Extension not syncing" />
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea rows="3">The extension stopped updating the policy after a restart.</textarea>
+        </label>
+        <button type="submit" class="primary-btn">Submit ticket</button>
+      </form>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "MINDLOCK Employee Console",
+  "version": "1.0.0",
+  "description": "Company productivity and support extension for managed laptops.",
+  "permissions": ["storage", "tabs", "webRequest", "declarativeNetRequestWithHostAccess", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "MINDLOCK",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

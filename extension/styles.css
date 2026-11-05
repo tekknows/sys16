@@ -1,0 +1,146 @@
+:root {
+  --bg: #f3f7ff;
+  --surface: #ffffff;
+  --surface-alt: #eff6ff;
+  --text: #111827;
+  --text-soft: #4b5563;
+  --border: #dfeafc;
+  --accent: #2563eb;
+  --success: #10b981;
+  --warning: #f59e0b;
+}
+
+body {
+  margin: 0;
+  min-width: 360px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, 'Segoe UI', sans-serif;
+}
+
+.popup-body {
+  padding: 18px;
+}
+
+.popup-header,
+.user-row,
+.summary-grid,
+.usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1, h2 {
+  margin: 0;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.theme-pill {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.overview-card,
+.card-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.avatar {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+}
+
+.user-row {
+  justify-content: flex-start;
+}
+
+#employeeMeta {
+  color: var(--text-soft);
+}
+
+.summary-grid {
+  margin-top: 18px;
+  gap: 16px;
+}
+
+.summary-grid > div,
+.usage-row > div {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+summary-grid span,
+.usage-row span,
+.card-block label span {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.list-items {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.list-items li {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+#issueForm {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+#issueForm label {
+  display: grid;
+  gap: 8px;
+}
+
+input, select, textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.primary-btn {
+  background: var(--accent);
+  border: none;
+  color: white;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 12px 16px;
+}

@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MINDLOCK Admin Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="dashboard-page">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">M</div>
+          <div>
+            <span class="eyebrow">Admin Portal</span>
+            <h1>MINDLOCK</h1>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Sidebar navigation">
+          <button class="nav-link active" data-section="dashboard">Dashboard</button>
+          <button class="nav-link" data-section="blocking">Website Blocking Schedule</button>
+          <button class="nav-link" data-section="assign">Assign Employee</button>
+          <button class="nav-link" data-section="requests">Request Change</button>
+          <button class="nav-link" data-section="employees">Employee</button>
+          <button class="nav-link" data-section="laptops">Laptop</button>
+          <button class="nav-link" data-section="tickets">Ticket</button>
+          <button class="nav-link" data-section="settings">Settings</button>
+        </nav>
+
+        <div class="sidebar-meta">
+          <button class="secondary-btn small-btn" id="logoutBtn">Logout</button>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Operations dashboard</p>
+            <h2 id="pageTitle">Dashboard</h2>
+          </div>
+
+          <div class="topbar-actions">
+            <button class="secondary-btn small-btn" id="refreshBtn">Refresh</button>
+            <button class="secondary-btn small-btn" id="themeToggleBtn">Dark mode</button>
+          </div>
+        </header>
+
+        <section id="dashboard" class="module-panel active">
+          <div class="stats-grid" id="statsGrid"></div>
+
+          <div class="content-grid two-col">
+            <div class="panel-card">
+              <div class="card-header">
+                <h3>Website usage</h3>
+                <span class="pill success">Live</span>
+              </div>
+              <div class="bar-chart" id="usageChart"></div>
+            </div>
+
+            <div class="panel-card">
+              <div class="card-header">
+                <h3>Ticket overview</h3>
+                <span class="pill warning">Updated</span>
+              </div>
+              <div class="donut-legend" id="ticketLegend"></div>
+            </div>
+          </div>
+
+          <div class="content-grid two-col">
+            <div class="panel-card">
+              <div class="card-header">
+                <h3>Recent activities</h3>
+                <button class="text-btn" id="showLogsBtn">View logs</button>
+              </div>
+              <ul class="activity-list" id="activityList"></ul>
+            </div>
+
+            <div class="panel-card">
+              <div class="card-header">
+                <h3>Notifications</h3>
+                <button class="text-btn" id="dismissNoticeBtn">Don’t show again this session</button>
+              </div>
+              <ul class="notification-list" id="notificationList"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="blocking" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Website blocking policy</h3>
+              <span class="pill accent">Global + assigned</span>
+            </div>
+            <form id="scheduleForm" class="form-grid">
+              <label>
+                <span>Website or domain</span>
+                <input name="domain" placeholder="example.com" />
+              </label>
+              <label>
+                <span>Reason</span>
+                <input name="reason" placeholder="Productivity policy" />
+              </label>
+              <label>
+                <span>Start time</span>
+                <input name="startTime" type="time" value="09:00" />
+              </label>
+              <label>
+                <span>End time</span>
+                <input name="endTime" type="time" value="17:30" />
+              </label>
+              <label class="span-2">
+                <span>Days of week</span>
+                <div class="days-row">
+                  <label><input type="checkbox" checked /> Mon</label>
+                  <label><input type="checkbox" checked /> Tue</label>
+                  <label><input type="checkbox" checked /> Wed</label>
+                  <label><input type="checkbox" checked /> Thu</label>
+                  <label><input type="checkbox" checked /> Fri</label>
+                  <label><input type="checkbox" /> Sat</label>
+                  <label><input type="checkbox" /> Sun</label>
+                </div>
+              </label>
+              <label>
+                <span>Activation date</span>
+                <input name="activateOn" type="date" />
+              </label>
+              <label>
+                <span>Expiration date</span>
+                <input name="expiresOn" type="date" />
+              </label>
+              <div class="span-2 actions-row">
+                <button type="submit" class="primary-btn">Save policy</button>
+                <button type="button" class="secondary-btn">Deploy to all employees</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Active schedules</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Schedule</th>
+                  <th>Scope</th>
+                  <th>Time</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="blockingTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="assign" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Assign employee to laptop</h3>
+            </div>
+            <form id="assignmentForm" class="form-grid">
+              <label>
+                <span>Employee</span>
+                <select id="assignmentEmployee">
+                  <option>Selena Park</option>
+                  <option>David Kim</option>
+                  <option>Priya Shah</option>
+                </select>
+              </label>
+              <label>
+                <span>Available laptop</span>
+                <select id="assignmentLaptop">
+                  <option>ML-209</option>
+                  <option>ML-310</option>
+                  <option>ML-512</option>
+                </select>
+              </label>
+              <div class="span-2 actions-row">
+                <button type="submit" class="primary-btn">Assign laptop</button>
+                <button type="button" class="secondary-btn">Reassign history</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Assignment history</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Laptop</th>
+                  <th>Assigned date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="assignmentTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="requests" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Change requests</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Type</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="requestTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="employees" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Employee directory</h3>
+            </div>
+            <input type="search" class="search-input" placeholder="Search employee" />
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Department</th>
+                  <th>Role</th>
+                  <th>Assigned laptop</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="employeeTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="laptops" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Laptop inventory</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Laptop ID</th>
+                  <th>Model</th>
+                  <th>Status</th>
+                  <th>Assigned to</th>
+                  <th>Last sync</th>
+                </tr>
+              </thead>
+              <tbody id="laptopTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="tickets" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <h3>Support tickets</h3>
+            </div>
+            <div class="filter-row">
+              <input type="search" class="search-input" placeholder="Search ticket ID" />
+              <select>
+                <option>All statuses</option>
+                <option>Open</option>
+                <option>In Progress</option>
+                <option>Resolved</option>
+                <option>Closed</option>
+              </select>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticket</th>
+                  <th>Employee</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="ticketTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="settings" class="module-panel">
+          <div class="settings-layout">
+            <div class="settings-tabs">
+              <button class="tab-link active" data-tab="general">General</button>
+              <button class="tab-link" data-tab="account">Account</button>
+              <button class="tab-link" data-tab="roles">Role & Access</button>
+              <button class="tab-link" data-tab="theme">Theme</button>
+              <button class="tab-link" data-tab="tickets">Ticket Settings</button>
+              <button class="tab-link" data-tab="incognito">Incognito</button>
+            </div>
+
+            <div class="settings-content">
+              <div class="tab-panel active" id="general">
+                <div class="panel-card">
+                  <h3>General settings</h3>
+                  <form class="form-grid compact">
+                    <label><span>Company name</span><input value="MINDLOCK" /></label>
+                    <label><span>Time zone</span><input value="UTC" /></label>
+                    <label><span>Notification preferences</span><input value="Email + In-app" /></label>
+                    <label><span>System preferences</span><input value="Default" /></label>
+                  </form>
+                </div>
+              </div>
+
+              <div class="tab-panel" id="account">
+                <div class="panel-card">
+                  <h3>Account settings</h3>
+                  <form class="form-grid compact">
+                    <label><span>Administrator email</span><input value="sys@admin.com" /></label>
+                    <label><span>Current password</span><input type="password" value="admin123" /></label>
+                    <label><span>New password</span><input type="password" /></label>
+                    <label><span>Confirm password</span><input type="password" /></label>
+                  </form>
+                </div>
+              </div>
+
+              <div class="tab-panel" id="roles">
+                <div class="panel-card">
+                  <h3>Role and access management</h3>
+                  <table>
+                    <thead><tr><th>Role</th><th>Access</th><th>Scope</th></tr></thead>
+                    <tbody>
+                      <tr><td>Administrator</td><td>Full access</td><td>All modules</td></tr>
+                      <tr><td>IT Staff</td><td>Tickets and device visibility</td><td>Assigned scope</td></tr>
+                      <tr><td>Employee</td><td>Personal extension</td><td>Own records</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="tab-panel" id="theme">
+                <div class="panel-card">
+                  <h3>Theme settings</h3>
+                  <label><span>Dashboard accent color</span><input type="color" value="#2563eb" id="accentColor" /></label>
+                  <div class="preview-box" id="accentPreview">Accent preview</div>
+                </div>
+              </div>
+
+              <div class="tab-panel" id="tickets">
+                <div class="panel-card">
+                  <h3>Ticket settings</h3>
+                  <form class="form-grid compact">
+                    <label><span>Ticket retention</span><input value="90 days" /></label>
+                    <label><span>Cleanup preview</span><input value="12 completed tickets" /></label>
+                  </form>
+                </div>
+              </div>
+
+              <div class="tab-panel" id="incognito">
+                <div class="panel-card">
+                  <h3>Global Incognito / InPrivate blocker</h3>
+                  <label class="toggle-row">
+                    <span>Enable global policy</span>
+                    <input type="checkbox" id="incognitoToggle" />
+                  </label>
+                  <p>Current policy status: <strong id="incognitoStatus">Disabled</strong></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

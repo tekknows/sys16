@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MINDLOCK Admin Login</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="login-page">
+    <div class="login-shell">
+      <div class="brand-panel">
+        <div class="brand-mark">M</div>
+        <div>
+          <p class="eyebrow">Managed productivity</p>
+          <h1>MINDLOCK</h1>
+        </div>
+        <p class="brand-copy">
+          Secure company laptop governance, website blocking, and digital wellness enforcement.
+        </p>
+        <ul class="feature-list">
+          <li>Scheduled website controls</li>
+          <li>Employee and laptop management</li>
+          <li>Support tickets and replacement workflow</li>
+        </ul>
+      </div>
+
+      <form id="loginForm" class="login-card" novalidate>
+        <p class="auth-label">Administrator access</p>
+        <h2>Sign in</h2>
+
+        <label class="input-field">
+          <span>Email</span>
+          <input id="email" type="email" placeholder="sys@admin.com" required />
+        </label>
+
+        <label class="input-field">
+          <span>Password</span>
+          <div class="password-row">
+            <input id="password" type="password" placeholder="Enter password" required />
+            <button type="button" class="password-toggle" id="togglePassword">Show</button>
+          </div>
+        </label>
+
+        <label class="checkbox-row">
+          <input id="remember" type="checkbox" />
+          <span>Remember me</span>
+        </label>
+
+        <button type="submit" class="primary-btn">Login</button>
+        <button type="button" class="secondary-btn" id="demoLoginBtn">Use default admin</button>
+        <p id="loginError" class="error-text hidden"></p>
+      </form>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
