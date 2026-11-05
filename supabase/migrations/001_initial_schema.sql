@@ -27,6 +27,7 @@ create table if not exists public.profiles (
 create table if not exists public.employees (
   id uuid primary key default gen_random_uuid(),
   profile_id uuid not null unique references public.profiles(id) on delete cascade,
+  user_id text not null unique default ('USR-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8))),
   employee_code text not null unique,
   department text,
   position text,
@@ -294,6 +295,7 @@ create table if not exists public.device_heartbeats (
 
 create index if not exists idx_profiles_email on public.profiles(email);
 create index if not exists idx_employees_employee_code on public.employees(employee_code);
+create index if not exists idx_employees_user_id on public.employees(user_id);
 create index if not exists idx_laptops_status on public.laptops(status, active);
 create index if not exists idx_assignments_active on public.laptop_assignments(status, employee_id, laptop_id);
 create index if not exists idx_tickets_status on public.tickets(status);
@@ -313,25 +315,32 @@ alter table public.change_logs enable row level security;
 alter table public.system_settings enable row level security;
 alter table public.notifications enable row level security;
 
-create policy if not exists "profiles_select_own" on public.profiles
+drop policy if exists "profiles_select_own" on public.profiles;
+create policy "profiles_select_own" on public.profiles
   for select using (auth.uid() = id);
 
-create policy if not exists "profiles_update_own" on public.profiles
+drop policy if exists "profiles_update_own" on public.profiles;
+create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id);
 
-create policy if not exists "employees_select_self" on public.employees
+drop policy if exists "employees_select_self" on public.employees;
+create policy "employees_select_self" on public.employees
   for select using (profile_id = auth.uid());
 
-create policy if not exists "admins_manage_admins" on public.admins
+drop policy if exists "admins_manage_admins" on public.admins;
+create policy "admins_manage_admins" on public.admins
   for all using (true) with check (true);
 
-create policy if not exists "laptops_view_auth_users" on public.laptops
+drop policy if exists "laptops_view_auth_users" on public.laptops;
+create policy "laptops_view_auth_users" on public.laptops
   for select using (auth.role() = 'authenticated');
 
-create policy if not exists "tickets_manage_auth_users" on public.tickets
+drop policy if exists "tickets_manage_auth_users" on public.tickets;
+create policy "tickets_manage_auth_users" on public.tickets
   for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
-create policy if not exists "notifications_manage_self" on public.notifications
+drop policy if exists "notifications_manage_self" on public.notifications;
+create policy "notifications_manage_self" on public.notifications
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 create or replace function public.set_updated_at()

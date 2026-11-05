@@ -8,7 +8,7 @@
   </head>
   <body class="dashboard-page">
     <div class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="brand-block">
           <div class="brand-mark">M</div>
           <div>
@@ -19,6 +19,7 @@
 
         <nav class="sidebar-nav" aria-label="Sidebar navigation">
           <button class="nav-link active" data-section="dashboard">Dashboard</button>
+          <button class="nav-link" data-section="analytics">Analytics</button>
           <button class="nav-link" data-section="blocking">Website Blocking Schedule</button>
           <button class="nav-link" data-section="assign">Assign Employee</button>
           <button class="nav-link" data-section="requests">Request Change</button>
@@ -41,7 +42,9 @@
           </div>
 
           <div class="topbar-actions">
+            <button class="secondary-btn small-btn" id="sidebarToggleBtn" aria-label="Minimize navigation" aria-expanded="true">☰</button>
             <button class="secondary-btn small-btn" id="refreshBtn">Refresh</button>
+            <button class="secondary-btn small-btn" id="updateLogsBtn">Update logs · v1.0.0</button>
             <button class="secondary-btn small-btn" id="themeToggleBtn">Dark mode</button>
           </div>
         </header>
@@ -82,6 +85,20 @@
                 <button class="text-btn" id="dismissNoticeBtn">Don’t show again this session</button>
               </div>
               <ul class="notification-list" id="notificationList"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="analytics" class="module-panel">
+          <div class="stats-grid" id="analyticsStats"></div>
+          <div class="content-grid two-col">
+            <div class="panel-card">
+              <div class="card-header"><h3>Website usage trends</h3><span class="pill success">This week</span></div>
+              <div class="bar-chart" id="analyticsChart"></div>
+            </div>
+            <div class="panel-card">
+              <div class="card-header"><h3>Most visited websites</h3></div>
+              <ul class="activity-list" id="topSitesList"></ul>
             </div>
           </div>
         </section>
@@ -188,9 +205,11 @@
             <div class="card-header">
               <h3>Assignment history</h3>
             </div>
+            <div class="table-scroll">
             <table>
               <thead>
                 <tr>
+                  <th>User ID</th>
                   <th>Employee</th>
                   <th>Laptop</th>
                   <th>Assigned date</th>
@@ -199,6 +218,7 @@
               </thead>
               <tbody id="assignmentTable"></tbody>
             </table>
+            </div>
           </div>
         </section>
 
@@ -226,11 +246,20 @@
           <div class="panel-card">
             <div class="card-header">
               <h3>Employee directory</h3>
+              <button type="button" class="primary-btn small-btn" id="addEmployeeBtn">Add employee</button>
             </div>
-            <input type="search" class="search-input" placeholder="Search employee" />
+            <div class="filter-row">
+              <input id="employeeSearch" type="search" class="search-input" placeholder="Search employee or user ID" />
+              <select id="employeeStatusFilter" aria-label="Filter employees by status">
+                <option value="">All statuses</option>
+                <option>Active</option>
+                <option>Suspended</option>
+              </select>
+            </div>
             <table>
               <thead>
                 <tr>
+                  <th>User ID</th>
                   <th>Name</th>
                   <th>Department</th>
                   <th>Role</th>
@@ -247,6 +276,17 @@
           <div class="panel-card">
             <div class="card-header">
               <h3>Laptop inventory</h3>
+              <button type="button" class="primary-btn small-btn" id="addLaptopBtn">Add laptop</button>
+            </div>
+            <div class="filter-row">
+              <input id="laptopSearch" type="search" class="search-input" placeholder="Search laptop or model" />
+              <select id="laptopStatusFilter" aria-label="Filter laptops by status">
+                <option value="">All statuses</option>
+                <option>Available</option>
+                <option>Assigned</option>
+                <option>Maintenance</option>
+                <option>Retired</option>
+              </select>
             </div>
             <table>
               <thead>
@@ -269,13 +309,19 @@
               <h3>Support tickets</h3>
             </div>
             <div class="filter-row">
-              <input type="search" class="search-input" placeholder="Search ticket ID" />
-              <select>
-                <option>All statuses</option>
+              <input id="ticketSearch" type="search" class="search-input" placeholder="Search ticket ID or employee" />
+              <select id="ticketStatusFilter" aria-label="Filter tickets by status">
+                <option value="">All statuses</option>
                 <option>Open</option>
                 <option>In Progress</option>
                 <option>Resolved</option>
                 <option>Closed</option>
+              </select>
+              <select id="ticketCategoryFilter" aria-label="Filter tickets by category">
+                <option value="">All categories</option>
+                <option>Browser Extension Issue</option>
+                <option>Website Blocking Issue</option>
+                <option>Laptop Hardware Problem</option>
               </select>
             </div>
             <table>
@@ -300,7 +346,7 @@
               <button class="tab-link" data-tab="account">Account</button>
               <button class="tab-link" data-tab="roles">Role & Access</button>
               <button class="tab-link" data-tab="theme">Theme</button>
-              <button class="tab-link" data-tab="tickets">Ticket Settings</button>
+              <button class="tab-link" data-tab="ticket-settings">Ticket Settings</button>
               <button class="tab-link" data-tab="incognito">Incognito</button>
             </div>
 
@@ -320,26 +366,42 @@
               <div class="tab-panel" id="account">
                 <div class="panel-card">
                   <h3>Account settings</h3>
-                  <form class="form-grid compact">
+                  <form class="form-grid compact" id="changePasswordForm">
                     <label><span>Administrator email</span><input value="sys@admin.com" /></label>
-                    <label><span>Current password</span><input type="password" value="admin123" /></label>
-                    <label><span>New password</span><input type="password" /></label>
-                    <label><span>Confirm password</span><input type="password" /></label>
+                    <label><span>Current password</span><span class="password-input"><input type="password" autocomplete="current-password" /><button type="button" class="eye-toggle" aria-label="Show current password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <label><span>New password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show new password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <label><span>Confirm password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show confirm password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save changes</button><button type="reset" class="secondary-btn">Cancel</button></div>
                   </form>
                 </div>
               </div>
 
               <div class="tab-panel" id="roles">
                 <div class="panel-card">
-                  <h3>Role and access management</h3>
+                  <div class="card-header">
+                    <h3>Role and access management</h3>
+                    <button type="button" class="primary-btn small-btn" id="addRoleAssignmentBtn">Add assignment</button>
+                  </div>
+                  <form id="roleAssignmentForm" class="form-grid compact hidden">
+                    <label><span>User ID</span><input id="roleUserId" required placeholder="USR-1001" /></label>
+                    <label><span>Role</span><select id="roleSelection"><option>Administrator</option><option>IT Staff</option><option>Employee</option></select></label>
+                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Assign role</button><button type="button" class="secondary-btn" id="cancelRoleAssignmentBtn">Cancel</button></div>
+                  </form>
                   <table>
                     <thead><tr><th>Role</th><th>Access</th><th>Scope</th></tr></thead>
-                    <tbody>
+                    <tbody id="roleTable">
                       <tr><td>Administrator</td><td>Full access</td><td>All modules</td></tr>
                       <tr><td>IT Staff</td><td>Tickets and device visibility</td><td>Assigned scope</td></tr>
                       <tr><td>Employee</td><td>Personal extension</td><td>Own records</td></tr>
                     </tbody>
                   </table>
+                  <h3 class="subsection-title">User role assignments</h3>
+                  <div class="table-scroll">
+                    <table>
+                      <thead><tr><th>User ID</th><th>Employee</th><th>Assigned role</th></tr></thead>
+                      <tbody id="userRoleAssignments"></tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
@@ -351,7 +413,7 @@
                 </div>
               </div>
 
-              <div class="tab-panel" id="tickets">
+              <div class="tab-panel" id="ticket-settings">
                 <div class="panel-card">
                   <h3>Ticket settings</h3>
                   <form class="form-grid compact">
@@ -364,17 +426,44 @@
               <div class="tab-panel" id="incognito">
                 <div class="panel-card">
                   <h3>Global Incognito / InPrivate blocker</h3>
-                  <label class="toggle-row">
-                    <span>Enable global policy</span>
-                    <input type="checkbox" id="incognitoToggle" />
-                  </label>
-                  <p>Current policy status: <strong id="incognitoStatus">Disabled</strong></p>
+                  <div class="incognito-control">
+                    <div><strong>Enable global policy</strong><p>Requested policy state. Device enforcement is reported by managed endpoint sync.</p></div>
+                    <label class="switch" aria-label="Toggle global Incognito policy">
+                      <input type="checkbox" id="incognitoToggle" />
+                      <span class="switch-slider"></span>
+                    </label>
+                  </div>
+                  <p>Requested status: <strong id="incognitoStatus">Disabled</strong></p>
                 </div>
               </div>
             </div>
           </div>
         </section>
       </main>
+    </div>
+
+    <div class="modal-backdrop hidden" id="updateLogsModal" role="dialog" aria-modal="true" aria-labelledby="updateLogsTitle">
+      <section class="modal-card">
+        <div class="card-header"><div><p class="eyebrow">Current release</p><h2 id="updateLogsTitle">Update logs</h2></div><button class="icon-btn" data-close-modal aria-label="Close update logs">×</button></div>
+        <div class="version-banner"><span>Version</span><strong>1.0.0</strong><time datetime="2026-11-06">November 6, 2026</time></div>
+        <h3>Initial MINDLOCK release</h3>
+        <p>Admin dashboard and employee extension foundation.</p>
+        <ul><li>Employee, laptop, ticket, and schedule modules</li><li>Incognito policy control and analytics overview</li><li>Navigation, theme, and account settings improvements</li></ul>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="userDetailsModal" role="dialog" aria-modal="true" aria-labelledby="userDetailsTitle">
+      <section class="modal-card">
+        <div class="card-header"><h2 id="userDetailsTitle">Employee and assigned laptop</h2><button class="icon-btn" data-close-modal aria-label="Close details">×</button></div>
+        <dl class="details-grid" id="userDetailsContent"></dl>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="createRecordModal" role="dialog" aria-modal="true">
+      <section class="modal-card">
+        <div class="card-header"><h2 id="createRecordTitle">Add record</h2><button class="icon-btn" data-close-modal aria-label="Close form">×</button></div>
+        <form id="createRecordForm" class="form-grid compact"></form>
+      </section>
     </div>
 
     <script src="app.js"></script>

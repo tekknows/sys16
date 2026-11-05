@@ -7,6 +7,7 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - `admin/` — admin login and protected dashboard UI
 - `extension/` — Chrome/Edge extension manifest and popup UI
 - `supabase/migrations/001_initial_schema.sql` — PostgreSQL schema and RLS starter logic
+- `supabase/migrations/002_employee_user_id.sql` — employee user IDs and active assignment constraints
 
 ## Quick start
 
@@ -20,6 +21,7 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 
 - Create a Supabase project.
 - Run the SQL in `supabase/migrations/001_initial_schema.sql`.
+- For an existing installation, run `supabase/migrations/002_employee_user_id.sql` after the initial schema.
 - Set up the initial admin user through Supabase Auth Admin, not by inserting into auth tables manually.
 - Use `sys@admin.com` / `admin123` only as a development bootstrap credential; the user must change the password after first login.
 
