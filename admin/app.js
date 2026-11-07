@@ -1,7 +1,7 @@
 const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
 
 const TICKET_PAGE_SIZE = 10;
-const TICKET_STATUSES = ['Open', 'Assigned', 'In Progress', 'Waiting for Employee', 'Waiting for IT', 'Resolved', 'Closed'];
+const TICKET_STATUSES = ['Open', 'In Progress', 'Waiting for Employee', 'Waiting for IT', 'Resolved', 'Closed'];
 let supabaseClient = null;
 let adminUser = null;
 let ticketPage = 0;
@@ -20,7 +20,14 @@ let blockingRules = [];
 let changeRequests = [];
 let activityLogs = [];
 let notifications = [];
+let deviceRegistrations = [];
+let connectionHistory = [];
 let selectedChangeRequest = null;
+let blockingScheduleSchemaReady = true;
+let blockingTargetSchemaReady = true;
+let ticketStatusCounts = {};
+let monitoringRefreshTimer = null;
+let deviceMonitoringSchemaReady = false;
 
 function isSupabaseConfigured() {
   const config = window.MINDLOCK_CONFIG;
@@ -34,6 +41,27 @@ function getSupabaseClient() {
     supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
   }
   return supabaseClient;
+}
+
+async function invokeSupabaseFunction(functionName, payload) {
+  const client = getSupabaseClient();
+  if (!client) throw new Error('Supabase is not configured.');
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!sessionData.session?.access_token) throw new Error('Your admin session has expired. Sign in again.');
+  const config = window.MINDLOCK_CONFIG;
+  const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/${functionName}`, {
+    method: 'POST',
+    headers: {
+      apikey: config.supabaseAnonKey,
+      Authorization: `Bearer ${sessionData.session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Device service failed (${response.status}).`);
+  return result;
 }
 
 function readState() {
@@ -68,12 +96,12 @@ function applyTheme(themeName, accentColor) {
   root.style.setProperty('--accent', accentColor || '#2563eb');
   document.body.classList.toggle('dark-mode', themeName === 'dark');
   document.body.classList.toggle('light-mode', themeName !== 'dark');
-  const btn = document.getElementById('themeToggleBtn');
-  if (btn) {
+  [document.getElementById('themeToggleBtn'), document.getElementById('loginThemeToggleBtn')].forEach((btn) => {
+    if (!btn) return;
     const label = themeName === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
     btn.setAttribute('aria-label', label);
     btn.setAttribute('title', label);
-  }
+  });
 }
 
 async function handleLogin(ev) {
@@ -125,6 +153,14 @@ function setupLoginPage() {
   const loginForm = document.getElementById('loginForm');
   const togglePassword = document.getElementById('togglePassword');
   const rememberedEmail = localStorage.getItem('mindlock-remember-admin');
+  const themeState = readState();
+  applyTheme(themeState.theme, themeState.accent);
+  document.getElementById('loginThemeToggleBtn')?.addEventListener('click', () => {
+    const nextState = readState();
+    nextState.theme = nextState.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(nextState.theme, nextState.accent);
+    saveState(nextState);
+  });
 
   if (rememberedEmail) {
     const emailField = document.getElementById('email');
@@ -175,11 +211,19 @@ function renderActivityList() {
 
 function renderNotifications() {
   const container = document.getElementById('notificationList');
-  if (!container) return;
-
-  container.innerHTML = notifications.length
-    ? notifications.map((item) => `<li><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.body)}</small></li>`).join('')
-    : '<li>No notifications.</li>';
+  const modalList = document.getElementById('notificationsModalList');
+  const markup = notifications.length
+    ? notifications.map((item) => `
+      <li class="${item.is_read ? '' : 'unread-notification'}">
+        <button type="button" class="notification-item" data-notification-id="${escapeHtml(item.id)}" ${item.is_read ? '' : 'aria-label="Mark notification as read"'}>
+          <strong>${escapeHtml(item.title)}</strong>
+          <small>${escapeHtml(item.body)}</small>
+          <time>${escapeHtml(formatDate(item.created_at))}</time>
+        </button>
+      </li>`).join('')
+    : '<li class="empty-notification">No notifications.</li>';
+  if (container) container.innerHTML = markup;
+  if (modalList) modalList.innerHTML = markup;
 }
 
 function renderBarChart() {
@@ -230,7 +274,20 @@ function renderAnalytics() {
 function renderTicketLegend() {
   const container = document.getElementById('ticketLegend');
   if (!container) return;
-  container.innerHTML = `<div class="legend-item"><span>Tickets</span><strong>${ticketCount}</strong></div>`;
+  const total = Object.values(ticketStatusCounts).reduce((sum, count) => sum + count, 0);
+  container.innerHTML = `
+    <div class="ticket-summary-total"><strong>${total}</strong><span>Total tickets</span></div>
+    <div class="ticket-status-list">
+      ${TICKET_STATUSES.map((status) => {
+        const count = ticketStatusCounts[status] || 0;
+        const share = total ? Math.round((count / total) * 100) : 0;
+        const className = status.toLowerCase().replaceAll(' ', '-');
+        return `<div class="ticket-status-row">
+          <div class="ticket-status-label"><span class="ticket-status-dot ${className}"></span><span>${escapeHtml(status)}</span><strong>${count}</strong></div>
+          <div class="ticket-status-track"><span class="${className}" style="width:${share}%"></span></div>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 function renderBlockingTable() {
@@ -238,23 +295,32 @@ function renderBlockingTable() {
   if (!table) return;
   table.innerHTML = blockingRules.length ? blockingRules.map((row) => {
     const days = (row.days_of_week || []).join(', ') || 'Every day';
+    const targetEmployee = row.target_profile_id
+      ? directoryEmployees.find((employee) => employee.profile_id === row.target_profile_id)
+      : null;
+    const scope = row.target_profile_id
+      ? targetEmployee
+        ? `${targetEmployee.name} (${targetEmployee.user_id})`
+        : 'Specific employee'
+      : 'All employees';
     const now = new Date();
     const day = now.toLocaleDateString('en-US', { weekday: 'short' });
     const time = now.toTimeString().slice(0, 5);
-    const start = row.start_time.slice(0, 5);
-    const end = row.end_time.slice(0, 5);
+    const start = String(row.start_time || '00:00').slice(0, 5);
+    const end = String(row.end_time || '23:59').slice(0, 5);
     const inTimeRange = start <= end ? time >= start && time <= end : time >= start || time <= end;
     const status = !row.is_active ? 'Paused' : (row.days_of_week || []).includes(day) && inTimeRange ? 'Active' : 'Scheduled';
     return `
         <tr>
           <td>${escapeHtml(row.domain)}</td>
-          <td>Global</td>
-          <td>${escapeHtml(row.start_time.slice(0, 5))} - ${escapeHtml(row.end_time.slice(0, 5))}<small>${escapeHtml(days)}</small></td>
+          <td>${escapeHtml(scope)}</td>
+          <td>${escapeHtml(start)} - ${escapeHtml(end)}</td>
+          <td>${escapeHtml(days)}</td>
           <td><span class="status-pill ${status === 'Active' ? 'success' : status === 'Scheduled' ? 'warning' : 'neutral'}">${status}</span></td>
           <td><button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button></td>
         </tr>
       `;
-  }).join('') : '<tr><td colspan="5">No website blocking policies configured.</td></tr>';
+  }).join('') : '<tr><td colspan="6">No website blocking policies configured.</td></tr>';
 }
 
 function renderAssignmentTable() {
@@ -275,11 +341,10 @@ function renderAssignmentOptions() {
   const employeeSelect = document.getElementById('assignmentEmployee');
   const laptopSelect = document.getElementById('assignmentLaptop');
   if (!employeeSelect || !laptopSelect) return;
-  const assignedEmployeeIds = new Set(directoryAssignments.filter((row) => row.status === 'Active').map((row) => row.employee.id));
-  const employees = directoryEmployees.filter((row) => row.active && !assignedEmployeeIds.has(row.id));
-  const laptops = directoryLaptops.filter((row) => row.status === 'Available');
+  const employees = directoryEmployees.filter((row) => row.active);
+  const laptops = directoryLaptops.filter((row) => row.status !== 'Retired');
   employeeSelect.innerHTML = `<option value="">Select an employee</option>${employees.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)}</option>`).join('')}`;
-  laptopSelect.innerHTML = `<option value="">Select an available laptop</option>${laptops.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.laptop_id)}</option>`).join('')}`;
+  laptopSelect.innerHTML = `<option value="">Select a laptop</option>${laptops.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.laptop_id)}${directoryAssignments.some((assignment) => assignment.laptop_id === row.id && assignment.status === 'Active') ? ' (currently assigned)' : ''}</option>`).join('')}`;
 }
 
 function renderRequestTable() {
@@ -302,20 +367,21 @@ function renderEmployeeTable() {
   const query = (document.getElementById('employeeSearch')?.value || '').trim().toLowerCase();
   const status = document.getElementById('employeeStatusFilter')?.value || '';
   table.innerHTML = directoryEmployees
-    .filter((row) => (!status || (row.active ? 'Active' : 'Suspended') === status) && (!query || `${row.user_id} ${row.name} ${row.department} ${row.email}`.toLowerCase().includes(query)))
-    .map(
-      (row) => `
-        <tr>
-          <td>${escapeHtml(row.user_id)}</td>
-          <td>${escapeHtml(row.name)}</td>
-          <td>${escapeHtml(row.department)}</td>
-          <td>${escapeHtml(row.role || 'Employee')}</td>
-          <td>${escapeHtml(directoryAssignments.find((assignment) => assignment.employee.id === row.id && assignment.status === 'Active')?.laptop.laptop_id || 'Unassigned')}</td>
-          <td><span class="status-pill ${row.active ? 'success' : 'neutral'}">${row.active ? 'Active' : 'Suspended'}</span></td>
-        </tr>
-      `,
-    )
-    .join('');
+    .filter((row) => (!status || (row.active ? 'Active' : 'Suspended') === status) && (!query || `${row.user_id} ${row.name} ${row.department} ${row.position} ${row.email}`.toLowerCase().includes(query)))
+    .map((row) => {
+      const assignment = getEmployeeLaptopAssignment(row.id);
+      const registration = assignment ? getActiveDeviceRegistration(assignment.laptop) : null;
+      return `<tr>
+        <td>${escapeHtml(row.user_id)}</td>
+        <td><button type="button" class="text-btn view-employee-details" data-employee-id="${escapeHtml(row.id)}">${escapeHtml(row.name)}</button></td>
+        <td>${escapeHtml(row.email)}</td>
+        <td>${escapeHtml(assignment?.laptop.laptop_id || 'Unassigned')}</td>
+        <td>${escapeHtml(assignment?.laptop.mac_address || '—')}</td>
+        <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
+        <td>${escapeHtml(formatDate(assignment?.laptop.last_seen_at || registration?.last_heartbeat_at))}</td>
+        <td>${statusPill(row.active ? (row.account_status || 'Active') : 'Suspended')}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="8">No employees found.</td></tr>';
 }
 
 function renderUserRoleAssignments() {
@@ -332,27 +398,52 @@ function renderLaptopTable() {
   const query = (document.getElementById('laptopSearch')?.value || '').trim().toLowerCase();
   const status = document.getElementById('laptopStatusFilter')?.value || '';
   table.innerHTML = directoryLaptops
-    .filter((row) => (!status || row.status === status) && (!query || `${row.laptop_id} ${row.model}`.toLowerCase().includes(query)))
-    .map(
-      (row) => `
-        <tr>
-          <td>${escapeHtml(row.laptop_id)}</td>
-          <td>${escapeHtml(row.model)}</td>
-          <td><span class="status-pill ${row.status === 'Assigned' ? 'success' : row.status === 'Maintenance' ? 'warning' : 'neutral'}">${escapeHtml(row.status)}</span></td>
-          <td>${escapeHtml(directoryAssignments.find((assignment) => assignment.laptop.id === row.id && assignment.status === 'Active')?.employee.name || 'Unassigned')}</td>
-          <td>${escapeHtml(row.last_sync_at ? formatDate(row.last_sync_at) : 'Never')}</td>
-        </tr>
-      `,
-    )
-    .join('') || '<tr><td colspan="5">No laptops registered.</td></tr>';
+    .filter((row) => (!status || row.status === status) && (!query || `${row.laptop_id} ${row.device_name} ${row.manufacturer} ${row.model} ${row.serial_number} ${row.mac_address}`.toLowerCase().includes(query)))
+    .map((row) => {
+      const assignment = getActiveLaptopAssignment(row.id);
+      const registration = getActiveDeviceRegistration(row);
+      return `<tr>
+        <td>${escapeHtml(row.laptop_id)}</td>
+        <td>${escapeHtml(assignment?.employee.name || 'Unassigned')}</td>
+        <td>${escapeHtml(assignment?.employee.user_id || '—')}</td>
+        <td>${escapeHtml(row.mac_address || registration?.mac_address || '—')}</td>
+        <td>${escapeHtml(registration?.registration_id || row.device_registration_id || '—')}</td>
+        <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
+        <td>${statusPill(registration ? 'Registered' : 'Unregistered')}</td>
+        <td>${escapeHtml(formatDate(row.last_seen_at || registration?.last_heartbeat_at))}</td>
+        <td>${escapeHtml(assignment ? formatDate(assignment.assigned_at) : '—')}</td>
+        <td class="laptop-actions">
+          <button type="button" class="text-btn view-laptop-details" data-laptop-id="${escapeHtml(row.id)}">View</button>
+          <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
+          ${registration
+            ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>`
+            : `<button type="button" class="text-btn register-device" data-laptop-id="${escapeHtml(row.id)}">Register</button>`}
+          <button type="button" class="text-btn connection-history-laptop" data-laptop-id="${escapeHtml(row.id)}">History</button>
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="10">No laptops registered.</td></tr>';
+}
+
+let dashboardToastTimer = null;
+
+function showToast(message, isError = false) {
+  const toast = document.getElementById('dashboardToast');
+  if (!toast || !message) return;
+  toast.textContent = message;
+  toast.classList.toggle('error', isError);
+  toast.classList.add('visible');
+  window.clearTimeout(dashboardToastTimer);
+  dashboardToastTimer = window.setTimeout(() => toast.classList.remove('visible'), 4200);
 }
 
 function setDashboardState(message, isError = false) {
   const state = document.getElementById('dashboardDataState');
-  if (!state) return;
-  state.textContent = message;
-  state.classList.toggle('error-text', isError);
-  state.classList.toggle('hidden', !message);
+  if (state) {
+    state.textContent = message;
+    state.classList.toggle('error-text', isError);
+    state.classList.toggle('hidden', !message);
+  }
+  if (message && !/^Loading\b/.test(message)) showToast(message, isError);
 }
 
 async function loadDashboardData() {
@@ -360,20 +451,75 @@ async function loadDashboardData() {
   if (!client || !adminUser) return;
   setDashboardState('Loading dashboard data…');
   try {
+    const { error: connectionCloseError } = await client.rpc('close_stale_device_connections');
+    if (connectionCloseError) throw connectionCloseError;
     const results = await Promise.all([
       client.from('employees').select('id,profile_id,user_id,department,position,active').order('created_at', { ascending: false }),
-      client.from('profiles').select('id,full_name,email,department,position'),
+      client.from('profiles').select('id,full_name,email,department,position,account_status'),
       client.from('user_roles').select('profile_id,role_name').is('revoked_at', null),
-      client.from('laptops').select('id,laptop_id,model,status,last_sync_at').order('created_at', { ascending: false }),
-      client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at').order('assigned_at', { ascending: false }),
-      client.from('website_blocking_rules').select('id,domain,start_time,end_time,days_of_week,is_active').order('created_at', { ascending: false }),
+      client.from('laptops').select('id,laptop_id,device_registration_id,device_name,manufacturer,model,serial_number,mac_address,operating_system,browser,extension_version,status,last_sync_at,last_seen_at').order('created_at', { ascending: false }),
+      client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at,ended_at').order('assigned_at', { ascending: false }),
       client.from('laptop_change_requests').select('id,profile_id,request_type,reason,status,created_at').order('created_at', { ascending: false }).limit(100),
       client.from('change_logs').select('id,action,module_name,created_at').order('created_at', { ascending: false }).limit(8),
       client.from('notifications').select('id,title,body,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
+      client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
+      client.from('device_connection_logs').select('id,laptop_id,employee_id,device_registration_id,connection_started_at,connection_ended_at,last_heartbeat_at,connection_status,recorded_at').order('recorded_at', { ascending: false }).limit(500),
     ]);
-    const failed = results.find((result) => result.error);
+    let laptopResult = results[3];
+    if (laptopResult.error && /mac_address/i.test(laptopResult.error.message)) {
+      laptopResult = await client.from('laptops')
+        .select('id,laptop_id,device_name,manufacturer,model,serial_number,operating_system,browser,extension_version,status,last_sync_at')
+        .order('created_at', { ascending: false });
+      if (!laptopResult.error) {
+        laptopResult.data = (laptopResult.data || []).map((laptop) => ({ ...laptop, mac_address: '' }));
+      }
+    }
+    const failed = results.filter((_, index) => index !== 3).find((result) => result.error);
     if (failed?.error) throw failed.error;
-    const [employeeResult, profileResult, roleResult, laptopResult, assignmentResult, ruleResult, requestResult, logResult, notificationResult] = results;
+    if (laptopResult.error) throw laptopResult.error;
+    deviceMonitoringSchemaReady = true;
+    let hasScheduleColumns = true;
+    let hasTargetColumn = true;
+    blockingScheduleSchemaReady = true;
+    blockingTargetSchemaReady = true;
+    let ruleResult;
+    while (true) {
+      const columns = [
+        'id',
+        'domain',
+        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
+        ...(hasTargetColumn ? ['target_profile_id'] : []),
+        'is_active',
+      ];
+      ruleResult = await client.from('website_blocking_rules')
+        .select(columns.join(','))
+        .order('created_at', { ascending: false });
+      if (!ruleResult.error) break;
+      const message = ruleResult.error.message;
+      if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(message)) {
+        hasScheduleColumns = false;
+        blockingScheduleSchemaReady = false;
+        continue;
+      }
+      if (hasTargetColumn && /target_profile_id/i.test(message)) {
+        hasTargetColumn = false;
+        blockingTargetSchemaReady = false;
+        continue;
+      }
+      throw ruleResult.error;
+    }
+    if (!hasScheduleColumns) {
+      ruleResult.data = (ruleResult.data || []).map((rule) => ({
+        ...rule,
+        start_time: '00:00',
+        end_time: '23:59',
+        days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      }));
+    }
+    if (!hasTargetColumn) {
+      ruleResult.data = (ruleResult.data || []).map((rule) => ({ ...rule, target_profile_id: null }));
+    }
+    const [employeeResult, profileResult, roleResult, , assignmentResult, requestResult, logResult, notificationResult, registrationResult, historyResult] = results;
     const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
     const roles = new Map((roleResult.data || []).map((role) => [role.profile_id, role.role_name]));
     directoryEmployees = (employeeResult.data || []).map((employee) => {
@@ -383,11 +529,27 @@ async function loadDashboardData() {
         userId: employee.user_id,
         name: profile.full_name || 'Unknown employee',
         email: profile.email || '',
+        account_status: profile.account_status || (employee.active ? 'Active' : 'Suspended'),
         department: employee.department || profile.department || '',
         position: employee.position || profile.position || '',
         role: roles.get(employee.profile_id) || 'Employee',
       };
     });
+    const targetEmployeeSelect = document.getElementById('blockingTargetEmployee');
+    if (targetEmployeeSelect) {
+      const selectedProfileId = targetEmployeeSelect.value;
+      const eligibleEmployees = directoryEmployees.filter((employee) => employee.active);
+      targetEmployeeSelect.innerHTML = '<option value="">All employees</option>' + eligibleEmployees.map((employee) => (
+        `<option value="${escapeHtml(employee.profile_id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
+      )).join('');
+      if (eligibleEmployees.some((employee) => employee.profile_id === selectedProfileId)) {
+        targetEmployeeSelect.value = selectedProfileId;
+      }
+      targetEmployeeSelect.disabled = !blockingTargetSchemaReady;
+      document.getElementById('blockingTargetHelp').textContent = blockingTargetSchemaReady
+        ? 'Choose one employee or leave this set to All employees.'
+        : 'Run migration 006_blocking_rule_employee_targets.sql to enable specific employee targeting.';
+    }
     directoryLaptops = laptopResult.data || [];
     const employeesById = new Map(directoryEmployees.map((employee) => [employee.id, employee]));
     const laptopsById = new Map(directoryLaptops.map((laptop) => [laptop.id, laptop]));
@@ -398,6 +560,9 @@ async function loadDashboardData() {
         employee: employeesById.get(assignment.employee_id),
         laptop: laptopsById.get(assignment.laptop_id),
       }));
+    deviceRegistrations = registrationResult.data || [];
+    connectionHistory = historyResult.data || [];
+    renderConnectionFilterOptions();
     blockingRules = ruleResult.data || [];
     const requestProfiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile.full_name]));
     changeRequests = (requestResult.data || []).map((request) => ({
@@ -416,11 +581,55 @@ async function loadDashboardData() {
     renderEmployeeTable();
     renderUserRoleAssignments();
     renderLaptopTable();
+    renderConnectionHistory();
     updateNotificationBell();
-    setDashboardState('');
+    setDashboardState(blockingScheduleSchemaReady
+      ? ''
+      : 'Website schedules need a database update. Run migration 004_admin_dashboard_workflows.sql to enable schedule days and times.');
   } catch (error) {
-    setDashboardState(`Dashboard data could not be loaded: ${error.message}`, true);
+    const needsMigration = /close_stale_device_connections|device_connection_logs|credential_hash|revoked_at|device_registrations/i.test(error.message);
+    if (needsMigration) deviceMonitoringSchemaReady = false;
+    setDashboardState(needsMigration
+      ? `Dashboard data could not be loaded: run migration 007_device_registration_monitoring.sql first. ${error.message}`
+      : `Dashboard data could not be loaded: ${error.message}`, true);
   }
+}
+
+async function refreshDeviceMonitoring() {
+  const client = getSupabaseClient();
+  if (!client || !adminUser || !deviceMonitoringSchemaReady) return;
+  const { error: closeError } = await client.rpc('close_stale_device_connections');
+  if (closeError) {
+    deviceMonitoringSchemaReady = false;
+    showToast(`Connection status could not be refreshed: ${closeError.message}`, true);
+    return;
+  }
+  const [registrationResult, historyResult] = await Promise.all([
+    client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
+    client.from('device_connection_logs').select('id,laptop_id,employee_id,device_registration_id,connection_started_at,connection_ended_at,last_heartbeat_at,connection_status,recorded_at').order('recorded_at', { ascending: false }).limit(500),
+  ]);
+  if (registrationResult.error || historyResult.error) {
+    deviceMonitoringSchemaReady = false;
+    showToast(`Device monitoring refresh failed: ${(registrationResult.error || historyResult.error).message}`, true);
+    return;
+  }
+  deviceRegistrations = registrationResult.data || [];
+  connectionHistory = historyResult.data || [];
+  const recentHeartbeats = new Map(deviceRegistrations
+    .filter((registration) => registration.is_active && registration.last_heartbeat_at)
+    .map((registration) => [registration.laptop_id, registration.last_heartbeat_at]));
+  directoryLaptops = directoryLaptops.map((laptop) => ({
+    ...laptop,
+    last_seen_at: recentHeartbeats.get(laptop.id) || laptop.last_seen_at,
+  }));
+  const updatedLaptops = new Map(directoryLaptops.map((laptop) => [laptop.id, laptop]));
+  directoryAssignments = directoryAssignments.map((assignment) => ({
+    ...assignment,
+    laptop: updatedLaptops.get(assignment.laptop_id) || assignment.laptop,
+  }));
+  renderEmployeeTable();
+  renderLaptopTable();
+  renderConnectionHistory();
 }
 
 function updateNotificationBell() {
@@ -429,6 +638,45 @@ function updateNotificationBell() {
   if (!button) return;
   button.setAttribute('aria-label', unread ? `${unread} unread notifications` : 'Notifications');
   button.dataset.count = unread ? String(unread) : '';
+}
+
+async function openNotifications() {
+  const modal = document.getElementById('notificationsModal');
+  const state = document.getElementById('notificationsModalState');
+  modal?.classList.remove('hidden');
+  state?.classList.add('hidden');
+  renderNotifications();
+  try {
+    const { data, error } = await getSupabaseClient().from('notifications')
+      .select('id,title,body,is_read,created_at')
+      .eq('user_id', adminUser.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    notifications = data || [];
+    renderNotifications();
+    updateNotificationBell();
+  } catch (error) {
+    if (state) {
+      state.textContent = `Notifications could not be loaded: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    }
+  }
+}
+
+async function markNotificationsRead(ids) {
+  if (!ids.length) return;
+  const { error } = await getSupabaseClient().from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', adminUser.id)
+    .in('id', ids);
+  if (error) throw error;
+  notifications = notifications.map((notification) => (
+    ids.includes(notification.id) ? { ...notification, is_read: true } : notification
+  ));
+  renderNotifications();
+  updateNotificationBell();
 }
 
 async function writeChangeLog(action, moduleName, recordId = null, previousValue = null, newValue = null) {
@@ -502,12 +750,88 @@ function formatDate(value) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
+function getActiveDeviceRegistration(laptop) {
+  return deviceRegistrations.find((registration) => (
+    registration.laptop_id === laptop.id && registration.is_active
+  )) || null;
+}
+
+function getDeviceConnectionStatus(registration) {
+  if (!registration) return 'Unregistered';
+  if (!registration.last_heartbeat_at) return 'Not Connected';
+  return Date.now() - new Date(registration.last_heartbeat_at).getTime() <= 3 * 60 * 1000
+    ? 'Online'
+    : 'Offline';
+}
+
+function getActiveLaptopAssignment(laptopId) {
+  return directoryAssignments.find((assignment) => assignment.laptop_id === laptopId && assignment.status === 'Active') || null;
+}
+
+function getEmployeeLaptopAssignment(employeeId) {
+  return directoryAssignments.find((assignment) => assignment.employee_id === employeeId && assignment.status === 'Active') || null;
+}
+
+function statusPill(status) {
+  const style = status === 'Online' || status === 'Registered' ? 'success'
+    : status === 'Offline' ? 'warning' : 'neutral';
+  return `<span class="status-pill ${style}">${escapeHtml(status)}</span>`;
+}
+
+function renderConnectionHistory() {
+  const table = document.getElementById('connectionHistoryTable');
+  if (!table) return;
+  const employeeId = document.getElementById('connectionEmployeeFilter').value;
+  const laptopId = document.getElementById('connectionLaptopFilter').value;
+  const from = document.getElementById('connectionDateFrom').value;
+  const to = document.getElementById('connectionDateTo').value;
+  const laptopsById = new Map(directoryLaptops.map((laptop) => [laptop.id, laptop]));
+  const filtered = connectionHistory.filter((entry) => {
+    const date = String(entry.recorded_at || entry.connection_started_at || '').slice(0, 10);
+    return (!employeeId || entry.employee_id === employeeId)
+      && (!laptopId || entry.laptop_id === laptopId)
+      && (!from || date >= from)
+      && (!to || date <= to);
+  });
+  table.innerHTML = filtered.length ? filtered.map((entry) => {
+    const laptop = laptopsById.get(entry.laptop_id);
+    const employee = directoryEmployees.find((row) => row.id === entry.employee_id);
+    const registration = laptop ? getActiveDeviceRegistration(laptop) : null;
+    return `<tr>
+      <td>${escapeHtml(laptop?.laptop_id || 'Unknown laptop')}</td>
+      <td>${escapeHtml(employee?.name || 'Unassigned')}</td>
+      <td>${escapeHtml(entry.device_registration_id)}</td>
+      <td>${escapeHtml(formatDate(entry.connection_started_at))}</td>
+      <td>${escapeHtml(entry.connection_ended_at ? formatDate(entry.connection_ended_at) : '—')}</td>
+      <td>${escapeHtml(formatDate(entry.last_heartbeat_at))}</td>
+      <td>${statusPill(entry.connection_ended_at ? 'Offline' : getDeviceConnectionStatus(registration))}</td>
+      <td>${escapeHtml(formatDate(entry.recorded_at))}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="8">No connection history matches these filters.</td></tr>';
+}
+
+function renderConnectionFilterOptions() {
+  const employeeSelect = document.getElementById('connectionEmployeeFilter');
+  const laptopSelect = document.getElementById('connectionLaptopFilter');
+  const selectedEmployee = employeeSelect.value;
+  const selectedLaptop = laptopSelect.value;
+  employeeSelect.innerHTML = '<option value="">All employees</option>' + directoryEmployees.map((employee) => (
+    `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
+  )).join('');
+  laptopSelect.innerHTML = '<option value="">All laptops</option>' + directoryLaptops.map((laptop) => (
+    `<option value="${escapeHtml(laptop.id)}">${escapeHtml(laptop.laptop_id)}</option>`
+  )).join('');
+  employeeSelect.value = selectedEmployee;
+  laptopSelect.value = selectedLaptop;
+}
+
 function setTicketListState(message, isError = false) {
   const state = document.getElementById('ticketListState');
   if (!state) return;
   state.textContent = message;
   state.classList.toggle('error-text', isError);
   state.classList.toggle('hidden', !message);
+  if (message && isError) showToast(message, true);
 }
 
 async function loadTickets() {
@@ -515,7 +839,9 @@ async function loadTickets() {
   if (!client) {
     ticketsOnPage = [];
     ticketCount = 0;
+    ticketStatusCounts = {};
     renderTicketTable();
+    renderTicketLegend();
     setTicketListState('Connect Supabase in admin/config.js and sign in to load tickets.');
     updateTicketPagination();
     return;
@@ -543,7 +869,9 @@ async function loadTickets() {
   if (error) {
     ticketsOnPage = [];
     ticketCount = 0;
+    ticketStatusCounts = {};
     renderTicketTable();
+    renderTicketLegend();
     setTicketListState(`Could not load tickets: ${error.message}`, true);
     updateTicketPagination();
     return;
@@ -551,6 +879,11 @@ async function loadTickets() {
 
   ticketsOnPage = data || [];
   ticketCount = count || 0;
+  try {
+    await loadTicketStatusCounts(client);
+  } catch (summaryError) {
+    setTicketListState(`Tickets loaded, but the overview could not be calculated: ${summaryError.message}`, true);
+  }
   renderTicketLegend();
   if (ticketsOnPage.length) {
     const ids = ticketsOnPage.map((ticket) => ticket.id);
@@ -572,6 +905,19 @@ async function loadTickets() {
   if (!listState.classList.contains('error-text')) {
     setTicketListState(ticketCount ? '' : 'No tickets match these filters.');
   }
+}
+
+async function loadTicketStatusCounts(client = getSupabaseClient()) {
+  if (!client) return;
+  const counts = await Promise.all(TICKET_STATUSES.map(async (status) => {
+    const { count, error } = await client.from('tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', status);
+    if (error) throw error;
+    return [status, count || 0];
+  }));
+  ticketStatusCounts = Object.fromEntries(counts);
+  renderTicketLegend();
 }
 
 function updateTicketPagination() {
@@ -1034,8 +1380,165 @@ function setupDashboardInteractions() {
   });
   document.querySelectorAll('.modal-backdrop').forEach((backdrop) => {
     backdrop.addEventListener('click', (event) => {
-      if (event.target === backdrop) backdrop.classList.add('hidden');
+      if (event.target === backdrop) {
+        backdrop.classList.add('hidden');
+        if (backdrop.id === 'deviceRegistrationModal') {
+          document.getElementById('deviceCredentialValue').value = '';
+          document.getElementById('deviceCredentialField').classList.add('hidden');
+          document.getElementById('copyDeviceCredentialBtn').classList.add('hidden');
+        }
+      }
     });
+  });
+  document.querySelectorAll('[data-close-modal]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.closest('#deviceRegistrationModal')) {
+        document.getElementById('deviceCredentialValue').value = '';
+        document.getElementById('deviceCredentialField').classList.add('hidden');
+        document.getElementById('copyDeviceCredentialBtn').classList.add('hidden');
+      }
+    });
+  });
+  document.getElementById('copyDeviceCredentialBtn')?.addEventListener('click', async () => {
+    const credential = document.getElementById('deviceCredentialValue').value;
+    try {
+      await navigator.clipboard.writeText(credential);
+      showToast('One-time device credential copied. Store it securely in the authorized agent.');
+    } catch (error) {
+      showToast(`Credential could not be copied: ${error.message}`, true);
+    }
+  });
+  document.getElementById('laptopTable')?.addEventListener('click', async (event) => {
+    const button = event.target instanceof Element ? event.target.closest('button[data-laptop-id]') : null;
+    if (!button) return;
+    const laptop = directoryLaptops.find((row) => row.id === button.dataset.laptopId);
+    if (!laptop) {
+      showToast('Laptop record not found. Refresh the dashboard and try again.', true);
+      return;
+    }
+    if (button.classList.contains('view-laptop-details')) {
+      const assignment = getActiveLaptopAssignment(laptop.id);
+      const registration = getActiveDeviceRegistration(laptop);
+      const details = {
+        'Laptop ID': laptop.laptop_id,
+        Model: laptop.model || '—',
+        'Assigned employee': assignment?.employee.name || 'Unassigned',
+        'Employee ID': assignment?.employee.user_id || '—',
+        'Employee email': assignment?.employee.email || '—',
+        'MAC address': laptop.mac_address || registration?.mac_address || '—',
+        'Device ID': registration?.registration_id || laptop.device_registration_id || '—',
+        'Connection status': getDeviceConnectionStatus(registration),
+        'Registration status': registration ? 'Registered' : 'Unregistered',
+        'Last seen': formatDate(laptop.last_seen_at || registration?.last_heartbeat_at),
+        'Assignment date': assignment ? formatDate(assignment.assigned_at) : '—',
+        'Registration history': deviceRegistrations
+          .filter((entry) => entry.laptop_id === laptop.id)
+          .map((entry) => `${entry.registration_id}: ${entry.is_active ? 'Registered' : 'Revoked'} (${formatDate(entry.revoked_at || entry.created_at)})`)
+          .join('\n') || 'No registrations',
+      };
+      document.getElementById('userDetailsTitle').textContent = `Laptop ${laptop.laptop_id}`;
+      document.getElementById('userDetailsContent').innerHTML = Object.entries(details)
+        .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('');
+      document.getElementById('userDetailsModal').classList.remove('hidden');
+      return;
+    }
+    if (button.classList.contains('assign-laptop')) {
+      setActiveSection('assign');
+      document.getElementById('assignmentLaptop').value = laptop.id;
+      document.getElementById('assignmentForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('assignmentEmployee').focus({ preventScroll: true });
+      return;
+    }
+    if (button.classList.contains('connection-history-laptop')) {
+      document.getElementById('connectionLaptopFilter').value = laptop.id;
+      renderConnectionHistory();
+      document.getElementById('connectionHistoryModal').classList.remove('hidden');
+      return;
+    }
+    if (button.classList.contains('register-device')) {
+      button.disabled = true;
+      const message = document.getElementById('deviceRegistrationMessage');
+      const modal = document.getElementById('deviceRegistrationModal');
+      const credentialField = document.getElementById('deviceCredentialField');
+      const credentialInput = document.getElementById('deviceCredentialValue');
+      const copyButton = document.getElementById('copyDeviceCredentialBtn');
+      message.textContent = 'Registering device securely…';
+      message.classList.remove('error-text');
+      credentialInput.value = '';
+      credentialField.classList.add('hidden');
+      copyButton.classList.add('hidden');
+      modal.classList.remove('hidden');
+      try {
+        const result = await invokeSupabaseFunction('device-registration', {
+          action: 'register',
+          laptop_id: laptop.id,
+          mac_address: laptop.mac_address || null,
+        });
+        message.textContent = `${result.message} Device ID: ${result.device_id}. Configure the authorized Windows agent promptly; this credential is shown only once.`;
+        credentialInput.value = result.credential;
+        credentialField.classList.remove('hidden');
+        copyButton.classList.remove('hidden');
+        try {
+          await writeChangeLog('Registered device', 'Laptops', laptop.laptop_id);
+        } catch (logError) {
+          showToast(`Device registered, but its activity log failed: ${logError.message}`, true);
+        }
+        await loadDashboardData();
+      } catch (error) {
+        message.textContent = `Device registration failed: ${error.message}`;
+        message.classList.add('error-text');
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+    if (button.classList.contains('revoke-device')) {
+      if (!window.confirm(`Revoke device registration for ${laptop.laptop_id}? Existing registration history will be retained.`)) return;
+      button.disabled = true;
+      try {
+        await invokeSupabaseFunction('device-registration', { action: 'revoke', laptop_id: laptop.id });
+        await loadDashboardData();
+        try {
+          await writeChangeLog('Revoked device registration', 'Laptops', laptop.laptop_id);
+          showToast(`Device registration for ${laptop.laptop_id} was revoked.`);
+        } catch (logError) {
+          showToast(`Device registration was revoked, but its activity log failed: ${logError.message}`, true);
+        }
+      } catch (error) {
+        showToast(`Device registration could not be revoked: ${error.message}`, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+  });
+  document.getElementById('employeeTable')?.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest('.view-employee-details') : null;
+    if (!button) return;
+    const employee = directoryEmployees.find((row) => row.id === button.dataset.employeeId);
+    if (!employee) return;
+    const assignment = getEmployeeLaptopAssignment(employee.id);
+    const laptop = assignment?.laptop;
+    const registration = laptop ? getActiveDeviceRegistration(laptop) : null;
+    const details = {
+      'Employee ID': employee.user_id,
+      'Full name': employee.name,
+      Email: employee.email,
+      'Account status': employee.active ? employee.account_status : 'Suspended',
+      'Assigned laptop': laptop?.laptop_id || 'Unassigned',
+      'Laptop model': laptop?.model || '—',
+      'MAC address': laptop?.mac_address || registration?.mac_address || '—',
+      'Device ID': registration?.registration_id || '—',
+      'Connection status': getDeviceConnectionStatus(registration),
+      'Last seen': formatDate(laptop?.last_seen_at || registration?.last_heartbeat_at),
+      'Assignment date': assignment ? formatDate(assignment.assigned_at) : '—',
+    };
+    document.getElementById('userDetailsTitle').textContent = `Employee ${employee.user_id}`;
+    document.getElementById('userDetailsContent').innerHTML = Object.entries(details)
+      .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value).replaceAll('\n', '<br>')}</dd></div>`).join('');
+    document.getElementById('userDetailsModal').classList.remove('hidden');
+  });
+  ['connectionEmployeeFilter', 'connectionLaptopFilter', 'connectionDateFrom', 'connectionDateTo'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', renderConnectionHistory);
   });
   document.getElementById('versionButton')?.addEventListener('click', () => document.getElementById('updateLogsModal')?.classList.remove('hidden'));
   document.getElementById('showLogsBtn')?.addEventListener('click', async () => {
@@ -1062,18 +1565,38 @@ function setupDashboardInteractions() {
       state.classList.add('error-text');
     }
   });
-  document.getElementById('notificationBellBtn')?.addEventListener('click', async () => {
-    document.getElementById('notificationList')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    const unreadIds = notifications.filter((notification) => !notification.is_read).map((notification) => notification.id);
-    if (!unreadIds.length) return;
+  document.getElementById('notificationBellBtn')?.addEventListener('click', openNotifications);
+  document.getElementById('notificationsModalList')?.addEventListener('click', async (event) => {
+    const item = event.target instanceof Element ? event.target.closest('.notification-item') : null;
+    if (!item) return;
     try {
-      const { error } = await getSupabaseClient().from('notifications').update({ is_read: true }).in('id', unreadIds);
-      if (error) throw error;
-      notifications = notifications.map((notification) => ({ ...notification, is_read: true }));
-      renderNotifications();
-      updateNotificationBell();
+      await markNotificationsRead([item.dataset.notificationId]);
     } catch (error) {
-      setDashboardState(`Notifications could not be marked read: ${error.message}`, true);
+      const state = document.getElementById('notificationsModalState');
+      state.textContent = `Notification could not be marked as read: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    }
+  });
+  document.getElementById('notificationList')?.addEventListener('click', async (event) => {
+    const item = event.target instanceof Element ? event.target.closest('.notification-item') : null;
+    if (!item) return;
+    document.getElementById('notificationsModal')?.classList.remove('hidden');
+    try {
+      await markNotificationsRead([item.dataset.notificationId]);
+    } catch (error) {
+      showToast(`Notification could not be marked as read: ${error.message}`, true);
+    }
+  });
+  document.getElementById('markAllNotificationsReadBtn')?.addEventListener('click', async () => {
+    try {
+      await markNotificationsRead(notifications.filter((notification) => !notification.is_read).map((notification) => notification.id));
+      showToast('All notifications marked as read.');
+    } catch (error) {
+      const state = document.getElementById('notificationsModalState');
+      state.textContent = `Notifications could not be marked as read: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
     }
   });
 
@@ -1098,6 +1621,7 @@ function setupDashboardInteractions() {
       state.textContent = message;
       state.classList.remove('hidden');
       state.classList.toggle('error-text', isError);
+      showToast(message, isError);
     };
     if (newPassword.value && newPassword.value !== confirmPassword.value) {
       confirmPassword.setCustomValidity('Passwords do not match.');
@@ -1115,16 +1639,10 @@ function setupDashboardInteractions() {
     state.classList.add('hidden');
     try {
       const client = getSupabaseClient();
+      if (!client || !adminUser) throw new Error('Your admin session has expired. Sign in again and retry.');
       const { error: verifyError } = await client.auth.signInWithPassword({
         email: adminUser.email,
         password: currentPassword.value,
-      });
-      document.getElementById('changePasswordForm')?.addEventListener('reset', (event) => {
-        const form = event.currentTarget;
-        window.setTimeout(() => {
-          form.querySelector('input[type="email"]').value = adminUser.email || '';
-          document.getElementById('accountFormState').classList.add('hidden');
-        }, 0);
       });
       if (verifyError) throw new Error(`Current password was not accepted: ${verifyError.message}`);
       const updates = {};
@@ -1151,6 +1669,13 @@ function setupDashboardInteractions() {
     } finally {
       submit.disabled = false;
     }
+  });
+  document.getElementById('changePasswordForm')?.addEventListener('reset', (event) => {
+    const form = event.currentTarget;
+    window.setTimeout(() => {
+      form.querySelector('input[type="email"]').value = adminUser.email || '';
+      document.getElementById('accountFormState').classList.add('hidden');
+    }, 0);
   });
   document.querySelectorAll('#changePasswordForm input[autocomplete="new-password"]').forEach((input) => {
     input.addEventListener('input', (event) => event.currentTarget.setCustomValidity(''));
@@ -1187,8 +1712,19 @@ function setupDashboardInteractions() {
 
   document.querySelectorAll('.tab-link').forEach((tab) => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab-link').forEach((link) => link.classList.toggle('active', link === tab));
-      document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === tab.dataset.tab));
+      const target = document.getElementById(tab.dataset.tab);
+      if (!target) {
+        showToast(`Settings tab "${tab.dataset.tab}" is unavailable.`, true);
+        return;
+      }
+      document.querySelectorAll('.tab-link').forEach((link) => {
+        const active = link === tab;
+        link.classList.toggle('active', active);
+        link.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel === target);
+      });
     });
   });
 
@@ -1196,12 +1732,16 @@ function setupDashboardInteractions() {
   if (scheduleForm) {
     const resetRuleForm = () => {
       scheduleForm.reset();
-      scheduleForm.elements.ruleId.value = '';
+      scheduleForm.elements.namedItem('ruleId').value = '';
       document.getElementById('cancelRuleEditBtn').classList.add('hidden');
     };
     document.getElementById('cancelRuleEditBtn')?.addEventListener('click', resetRuleForm);
     scheduleForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (!blockingScheduleSchemaReady) {
+        setDashboardState('Cannot save schedule times yet. Run migration 004_admin_dashboard_workflows.sql in Supabase first.', true);
+        return;
+      }
       const formData = new FormData(scheduleForm);
       const domain = String(formData.get('domain') || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
       const days = formData.getAll('days');
@@ -1217,6 +1757,11 @@ function setupDashboardInteractions() {
       }
       const ruleId = String(formData.get('ruleId') || '');
       const priorRule = blockingRules.find((rule) => rule.id === ruleId);
+      const targetProfileId = scheduleForm.elements.namedItem('targetProfileId').value;
+      if (targetProfileId && !blockingTargetSchemaReady) {
+        setDashboardState('Specific employee schedules require migration 006_blocking_rule_employee_targets.sql.', true);
+        return;
+      }
       const values = {
         domain,
         start_time: formData.get('startTime'),
@@ -1225,6 +1770,7 @@ function setupDashboardInteractions() {
         is_active: priorRule?.is_active ?? true,
         created_by: adminUser.id,
       };
+      if (blockingTargetSchemaReady) values.target_profile_id = targetProfileId || null;
       const submit = scheduleForm.querySelector('button[type="submit"]');
       submit.disabled = true;
       try {
@@ -1235,7 +1781,10 @@ function setupDashboardInteractions() {
         await writeChangeLog(ruleId ? 'Updated blocking schedule' : 'Created blocking schedule', 'Website blocking', ruleId || domain);
         resetRuleForm();
         await loadDashboardData();
-        setDashboardState(`Policy saved for ${domain}.`);
+        const target = targetProfileId
+          ? directoryEmployees.find((employee) => employee.profile_id === targetProfileId)
+          : null;
+        setDashboardState(`Policy saved for ${domain} (${target ? target.name : 'all employees'}).`);
       } catch (error) {
         setDashboardState(`Website policy could not be saved: ${error.message}`, true);
       } finally {
@@ -1243,21 +1792,28 @@ function setupDashboardInteractions() {
       }
     });
   }
-  document.getElementById('blockingTable')?.addEventListener('click', (event) => {
-    const button = event.target.closest('.edit-blocking-rule');
+  document.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest('.edit-blocking-rule') : null;
     if (!button) return;
     const rule = blockingRules.find((row) => row.id === button.dataset.ruleId);
-    if (!rule) return;
+    if (!rule) {
+      showToast('This blocking schedule could not be found. Refresh the dashboard and try again.', true);
+      return;
+    }
     const form = document.getElementById('scheduleForm');
-    form.elements.ruleId.value = rule.id;
-    form.elements.domain.value = rule.domain;
-    form.elements.startTime.value = rule.start_time.slice(0, 5);
-    form.elements.endTime.value = rule.end_time.slice(0, 5);
+    setActiveSection('blocking');
+    form.elements.namedItem('ruleId').value = rule.id;
+    form.elements.namedItem('domain').value = rule.domain;
+    form.elements.namedItem('targetProfileId').value = rule.target_profile_id || '';
+    form.elements.namedItem('startTime').value = String(rule.start_time || '00:00').slice(0, 5);
+    form.elements.namedItem('endTime').value = String(rule.end_time || '23:59').slice(0, 5);
     form.querySelectorAll('input[name="days"]').forEach((input) => {
       input.checked = (rule.days_of_week || []).includes(input.value);
     });
     document.getElementById('cancelRuleEditBtn').classList.remove('hidden');
     form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    form.elements.namedItem('domain').focus({ preventScroll: true });
+    showToast(`Editing ${rule.domain}.`);
   });
 
   const assignmentForm = document.getElementById('assignmentForm');
@@ -1268,23 +1824,25 @@ function setupDashboardInteractions() {
       const laptopId = document.getElementById('assignmentLaptop').value;
       const employee = directoryEmployees.find((row) => row.id === employeeId);
       const laptop = directoryLaptops.find((row) => row.id === laptopId);
-      if (!employee || !laptop || laptop.status !== 'Available' || !employee.active) {
-        setDashboardState('Choose an active employee and an available laptop.', true);
+      if (!employee || !laptop || laptop.status === 'Retired' || !employee.active) {
+        setDashboardState('Choose an active employee and a laptop that is not retired.', true);
         return;
       }
       try {
-        const { error } = await getSupabaseClient().from('laptop_assignments').insert({
-          employee_id: employee.id,
-          laptop_id: laptop.id,
-          assigned_by: adminUser.id,
-          status: 'Active',
+        const { error } = await getSupabaseClient().rpc('assign_laptop_to_employee', {
+          p_employee_id: employee.id,
+          p_laptop_id: laptop.id,
+          p_assigned_by: adminUser.id,
         });
         if (error) throw error;
-        await writeChangeLog('Assigned laptop', 'Assignments', laptop.laptop_id);
+        await writeChangeLog('Assigned or reassigned laptop', 'Assignments', laptop.laptop_id);
         await loadDashboardData();
-        setDashboardState(`Laptop ${laptop.laptop_id} assigned to ${employee.name}.`);
+        setDashboardState(`Laptop ${laptop.laptop_id} assigned to ${employee.name}. Previous assignments remain in history.`);
       } catch (error) {
-        setDashboardState(`Laptop assignment failed: ${error.message}`, true);
+        const needsMigration = /assign_laptop_to_employee/i.test(error.message);
+        setDashboardState(needsMigration
+          ? `Laptop assignment failed: run migration 007_device_registration_monitoring.sql first. ${error.message}`
+          : `Laptop assignment failed: ${error.message}`, true);
       }
     });
   }
@@ -1302,6 +1860,7 @@ function setupDashboardInteractions() {
     const assignment = directoryAssignments.find((row) => row.employee.id === profile?.id && row.status === 'Active');
     const device = assignment?.laptop;
     if (!profile) return;
+    document.getElementById('userDetailsTitle').textContent = `Employee ${profile.user_id}`;
     const details = {
       'User ID': profile.user_id,
       'Full name': profile.name,
@@ -1313,6 +1872,7 @@ function setupDashboardInteractions() {
       'Assigned laptop': device?.laptop_id || 'Unassigned',
       Model: device?.model || '—',
       'Laptop status': device?.status || '—',
+      'MAC address': device?.mac_address || '—',
       'Last sync': device?.last_sync_at ? formatDate(device.last_sync_at) : '—',
     };
     document.getElementById('userDetailsContent').innerHTML = Object.entries(details)
@@ -1356,6 +1916,7 @@ function setupDashboardInteractions() {
       if (error) throw error;
       selectedTicket.status = status;
       document.getElementById('ticketDetailState').textContent = 'Ticket status updated.';
+      showToast('Ticket status updated.');
       renderTicketInfo(selectedTicket);
       await loadTickets();
     } catch (error) {
@@ -1383,6 +1944,7 @@ function setupDashboardInteractions() {
       selectedTicket = updatedTicket;
       renderTicketInfo(selectedTicket);
       document.getElementById('ticketDetailState').textContent = 'Ticket assignment updated.';
+      showToast('Ticket assignment updated.');
       await Promise.all([loadTicketAssignmentHistory(), loadTickets()]);
     } catch (error) {
       document.getElementById('ticketDetailState').textContent = `Ticket assignment failed: ${error.message}`;
@@ -1458,6 +2020,7 @@ function setupDashboardInteractions() {
       roleForm.reset();
       roleForm.classList.add('hidden');
       await loadDashboardData();
+      showToast(`${role} role assigned.`);
     } catch (error) {
       setDashboardState(`Role assignment failed: ${error.message}`, true);
     }
@@ -1474,8 +2037,8 @@ function setupDashboardInteractions() {
       ? '<option>Employee</option><option>IT Staff</option><option>Administrator</option>'
       : '<option>Employee</option>';
     createRecordForm.innerHTML = employee
-      ? `<p class="span-2">Employee ID is assigned automatically. The email must already belong to a registered account.</p><label><span>Email</span><input name="email" type="email" required></label><label><span>Department</span><input name="department"></label><label><span>Position</span><input name="position"></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee</button></div>`
-      : '<p class="span-2">Laptop ID is assigned automatically.</p><label><span>Model</span><input name="model" required></label><label><span>Status</span><select name="status"><option>Available</option><option>Maintenance</option><option>Retired</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add laptop</button></div>';
+      ? `<p class="span-2">Employee ID is generated automatically. The email must belong to a registered Supabase account.</p><label><span>Full name</span><input name="name" required></label><label><span>Company email</span><input name="email" type="email" required></label><label><span>Department</span><input name="department" required></label><label><span>Job title</span><input name="position" required></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Account status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee</button></div>`
+      : '<p class="span-2">Laptop ID is assigned automatically. Enter the MAC address from the authorized IT registration process; a browser cannot read physical MAC addresses.</p><label><span>Device name</span><input name="device_name" placeholder="Optional hostname"></label><label><span>Manufacturer</span><input name="manufacturer" placeholder="Dell, HP, Lenovo..."></label><label><span>Model</span><input name="model" required></label><label><span>Serial number (optional)</span><input name="serial_number" placeholder="Optional"></label><label><span>MAC address (optional)</span><input name="mac_address" placeholder="00:1A:2B:3C:4D:5E" pattern="^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"></label><label><span>Status</span><select name="status"><option>Available</option><option>Maintenance</option><option>Retired</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add laptop</button></div>';
     createRecordModal.classList.remove('hidden');
   };
   document.getElementById('addEmployeeBtn')?.addEventListener('click', () => openCreateForm('employee'));
@@ -1492,6 +2055,12 @@ function setupDashboardInteractions() {
           .select('id,email').eq('email', String(formData.email).trim()).limit(1);
         if (profileError) throw profileError;
         if (!profiles.length) throw new Error('No registered account uses that email. Create its account first.');
+        const { error: updateProfileError } = await client.from('profiles').update({
+          full_name: String(formData.name).trim(),
+          department: formData.department || null,
+          position: formData.position || null,
+        }).eq('id', profiles[0].id);
+        if (updateProfileError) throw updateProfileError;
         const { data: employee, error } = await client.from('employees').insert({
           profile_id: profiles[0].id,
           department: formData.department || null,
@@ -1509,7 +2078,14 @@ function setupDashboardInteractions() {
         await writeChangeLog('Created employee record', 'Employees', employee.user_id);
       } else {
         const { data: laptop, error } = await client.from('laptops').insert({
-          model: formData.model.trim(),
+          device_name: String(formData.device_name || '').trim() || null,
+          manufacturer: String(formData.manufacturer || '').trim() || null,
+          model: String(formData.model).trim(),
+          serial_number: String(formData.serial_number || '').trim() || null,
+          mac_address: String(formData.mac_address || '').trim().toUpperCase() || null,
+          operating_system: null,
+          browser: null,
+          extension_version: null,
           status: formData.status,
         }).select('laptop_id').single();
         if (error) throw error;
@@ -1518,8 +2094,12 @@ function setupDashboardInteractions() {
       createRecordModal.classList.add('hidden');
       createRecordForm.reset();
       await loadDashboardData();
+      showToast(createRecordForm.dataset.kind === 'employee' ? 'Employee added.' : 'Laptop added.');
     } catch (error) {
-      setDashboardState(`Record could not be created: ${error.message}`, true);
+      const needsMigration = /mac_address/i.test(error.message);
+      setDashboardState(needsMigration
+        ? 'Add laptop failed: run migration 005_admin_dashboard_device_details.sql to add MAC address storage.'
+        : `Record could not be created: ${error.message}`, true);
     } finally {
       submit.disabled = false;
     }
@@ -1556,6 +2136,7 @@ function setupDashboardInteractions() {
       await writeChangeLog(`${status} change request`, 'Change requests', selectedChangeRequest.id);
       document.getElementById('requestReviewModal').classList.add('hidden');
       await loadDashboardData();
+      showToast(`Request ${status.toLowerCase()}.`);
     } catch (error) {
       state.textContent = `Request review failed: ${error.message}`;
       state.classList.remove('hidden');
@@ -1579,6 +2160,10 @@ async function initDashboard() {
   setupDashboardInteractions();
   setupTicketListRealtime();
   await Promise.all([loadDashboardData(), loadTickets(), loadAnalyticsData()]);
+  if (monitoringRefreshTimer) window.clearInterval(monitoringRefreshTimer);
+  monitoringRefreshTimer = window.setInterval(() => {
+    refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
+  }, 30000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

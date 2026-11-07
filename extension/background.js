@@ -10,18 +10,48 @@ async function syncBlockingRules() {
   let schedules = [];
   if (session) {
     const config = globalThis.MINDLOCK_CONFIG;
-    const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_blocking_rules?is_active=eq.true&select=domain,start_time,end_time,days_of_week`, {
-      headers: {
-        apikey: config.supabaseAnonKey,
-        Authorization: `******`,
-      },
-    });
-    if (!response.ok) throw new Error(`Could not load website policies (${response.status}).`);
+    let hasScheduleColumns = true;
+    let hasTargetColumn = true;
+    let response;
+    while (true) {
+      const columns = [
+        'domain',
+        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
+        ...(hasTargetColumn ? ['target_profile_id'] : []),
+      ];
+      response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_blocking_rules?is_active=eq.true&select=${columns.join(',')}`, {
+        headers: {
+          apikey: config.supabaseAnonKey,
+          Authorization: `******`,
+        },
+      });
+      if (response.ok) break;
+      const errorText = await response.text();
+      if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(errorText)) {
+        hasScheduleColumns = false;
+        continue;
+      }
+      if (hasTargetColumn && /target_profile_id/i.test(errorText)) {
+        hasTargetColumn = false;
+        continue;
+      }
+      throw new Error(`Could not load website policies (${response.status}): ${errorText}`);
+    }
     schedules = await response.json();
+    if (!hasScheduleColumns) {
+      schedules = schedules.map((rule) => ({
+        ...rule,
+        start_time: '00:00',
+        end_time: '23:59',
+        days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      }));
+    }
+    if (!hasTargetColumn) schedules = schedules.map((rule) => ({ ...rule, target_profile_id: null }));
   }
   const day = new Date().toLocaleDateString('en-US', { weekday: 'short' });
   const now = new Date().toTimeString().slice(0, 5);
   const domains = schedules.filter((rule) => {
+    if (rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
     if (!(rule.days_of_week || []).includes(day)) return false;
     const start = String(rule.start_time).slice(0, 5);
     const end = String(rule.end_time).slice(0, 5);

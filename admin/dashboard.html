@@ -78,7 +78,7 @@
             <div class="panel-card">
               <div class="card-header">
                 <h3>Ticket overview</h3>
-                <span class="pill warning">Updated</span>
+                <span class="pill accent">By status</span>
               </div>
               <div class="donut-legend" id="ticketLegend"></div>
             </div>
@@ -123,13 +123,20 @@
           <div class="panel-card">
             <div class="card-header">
               <h3>Website blocking policy</h3>
-              <span class="pill accent">Global + assigned</span>
+              <span class="pill accent">All employees or specific employee</span>
             </div>
             <form id="scheduleForm" class="form-grid">
               <input name="ruleId" type="hidden" />
               <label>
                 <span>Website or domain</span>
                 <input name="domain" placeholder="example.com" required />
+              </label>
+              <label>
+                <span>Apply to</span>
+                <select name="targetProfileId" id="blockingTargetEmployee">
+                  <option value="">All employees</option>
+                </select>
+                <small class="panel-subtitle" id="blockingTargetHelp"></small>
               </label>
               <label>
                 <span>Start time</span>
@@ -168,6 +175,7 @@
                   <th>Schedule</th>
                   <th>Scope</th>
                   <th>Time</th>
+                  <th>Days</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -188,9 +196,10 @@
                 <select id="assignmentEmployee"><option value="">Select an employee</option></select>
               </label>
               <label>
-                <span>Available laptop</span>
-                <select id="assignmentLaptop"><option value="">Select an available laptop</option></select>
+                <span>Laptop</span>
+                <select id="assignmentLaptop"><option value="">Select a laptop</option></select>
               </label>
+              <p class="span-2 panel-subtitle">Reassigning an employee or laptop preserves the previous assignment in the history.</p>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Assign laptop</button>
                 <button type="button" class="secondary-btn" id="reassignHistoryBtn">Reassign history</button>
@@ -258,10 +267,12 @@
                 <tr>
                   <th>User ID</th>
                   <th>Name</th>
-                  <th>Department</th>
-                  <th>Role</th>
+                  <th>Email</th>
                   <th>Assigned laptop</th>
-                  <th>Status</th>
+                  <th>MAC address</th>
+                  <th>Connection</th>
+                  <th>Last seen</th>
+                  <th>Account status</th>
                 </tr>
               </thead>
               <tbody id="employeeTable"></tbody>
@@ -275,8 +286,9 @@
               <h3>Laptop inventory</h3>
               <button type="button" class="primary-btn small-btn" id="addLaptopBtn">Add laptop</button>
             </div>
+            <p class="panel-subtitle">Live connection status requires deployment of the device Edge Functions and an authorized Windows monitoring agent.</p>
             <div class="filter-row">
-              <input id="laptopSearch" type="search" class="search-input" placeholder="Search laptop or model" />
+              <input id="laptopSearch" type="search" class="search-input" placeholder="Search ID, model or MAC address" />
               <select id="laptopStatusFilter" aria-label="Filter laptops by status">
                 <option value="">All statuses</option>
                 <option>Available</option>
@@ -289,10 +301,15 @@
               <thead>
                 <tr>
                   <th>Laptop ID</th>
-                  <th>Model</th>
-                  <th>Status</th>
-                  <th>Assigned to</th>
-                  <th>Last sync</th>
+                  <th>Assigned employee</th>
+                  <th>Employee ID</th>
+                  <th>MAC address</th>
+                  <th>Device ID</th>
+                  <th>Connection</th>
+                  <th>Registration</th>
+                  <th>Last seen</th>
+                  <th>Assignment date</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="laptopTable"></tbody>
@@ -310,7 +327,6 @@
               <select id="ticketStatusFilter" aria-label="Filter tickets by status">
                 <option value="">All statuses</option>
                 <option>Open</option>
-                <option>Assigned</option>
                 <option>In Progress</option>
                 <option>Waiting for Employee</option>
                 <option>Waiting for IT</option>
@@ -361,7 +377,7 @@
                 <dl class="ticket-info-list" id="ticketInfoList"></dl>
                 <label class="ticket-status-field"><span>Status</span>
                   <select id="ticketDetailStatus">
-                    <option>Open</option><option>Assigned</option><option>In Progress</option><option>Waiting for Employee</option><option>Waiting for IT</option><option>Resolved</option><option>Closed</option>
+                    <option>Open</option><option>In Progress</option><option>Waiting for Employee</option><option>Waiting for IT</option><option>Resolved</option><option>Closed</option>
                   </select>
                 </label>
                 <button type="button" class="primary-btn" id="saveTicketStatusBtn">Update status</button>
@@ -428,7 +444,7 @@
                   <h3>Account settings</h3>
                   <form class="form-grid compact" id="changePasswordForm">
                     <label><span>Administrator email</span><input type="email" autocomplete="email" required /></label>
-                    <label><span>Current password</span><span class="password-input"><input type="password" autocomplete="current-password" /><button type="button" class="eye-toggle" aria-label="Show current password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <label><span>Current password</span><span class="password-input"><input type="password" autocomplete="current-password" required /><button type="button" class="eye-toggle" aria-label="Show current password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <label><span>New password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show new password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <label><span>Confirm password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show confirm password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save changes</button><button type="reset" class="secondary-btn">Cancel</button></div>
@@ -521,9 +537,49 @@
     </div>
 
     <div class="modal-backdrop hidden" id="createRecordModal" role="dialog" aria-modal="true">
-      <section class="modal-card">
+      <section class="modal-card laptop-record-modal">
         <div class="card-header"><h2 id="createRecordTitle">Add record</h2><button class="icon-btn" data-close-modal aria-label="Close form">×</button></div>
         <form id="createRecordForm" class="form-grid compact"></form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="deviceRegistrationModal" role="dialog" aria-modal="true" aria-labelledby="deviceRegistrationTitle">
+      <section class="modal-card">
+        <div class="card-header">
+          <div><p class="eyebrow">Authorized IT provisioning</p><h2 id="deviceRegistrationTitle">Device registration</h2></div>
+          <button class="icon-btn" data-close-modal aria-label="Close device registration">×</button>
+        </div>
+        <p id="deviceRegistrationMessage" class="panel-subtitle"></p>
+        <label id="deviceCredentialField" class="device-credential-field hidden">
+          <span>One-time agent credential — copy it now; it will not be saved in the dashboard.</span>
+          <textarea id="deviceCredentialValue" rows="3" readonly></textarea>
+        </label>
+        <div class="actions-row">
+          <button class="secondary-btn hidden" type="button" id="copyDeviceCredentialBtn">Copy credential</button>
+          <button class="secondary-btn" type="button" data-close-modal>Close</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="connectionHistoryModal" role="dialog" aria-modal="true" aria-labelledby="connectionHistoryTitle">
+      <section class="modal-card history-modal-card">
+        <div class="card-header">
+          <div><p class="eyebrow">Device monitoring</p><h2 id="connectionHistoryTitle">Connection history</h2></div>
+          <button class="icon-btn" data-close-modal aria-label="Close connection history">×</button>
+        </div>
+        <div class="filter-row">
+          <select id="connectionEmployeeFilter" aria-label="Filter by employee"><option value="">All employees</option></select>
+          <select id="connectionLaptopFilter" aria-label="Filter by laptop"><option value="">All laptops</option></select>
+          <label>From <input id="connectionDateFrom" type="date" /></label>
+          <label>To <input id="connectionDateTo" type="date" /></label>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Laptop</th><th>Employee</th><th>Device ID</th><th>Started</th><th>Ended</th><th>Last heartbeat</th><th>Status</th><th>Recorded</th></tr></thead>
+            <tbody id="connectionHistoryTable"></tbody>
+          </table>
+        </div>
+        <p id="connectionHistoryState" class="form-state hidden" role="status"></p>
       </section>
     </div>
 
@@ -544,6 +600,20 @@
         <p class="form-state hidden" id="activityLogsState" role="status"></p>
       </section>
     </div>
+
+    <div class="modal-backdrop hidden" id="notificationsModal" role="dialog" aria-modal="true" aria-labelledby="notificationsTitle">
+      <section class="modal-card">
+        <div class="card-header">
+          <div><p class="eyebrow">Admin updates</p><h2 id="notificationsTitle">Notifications</h2></div>
+          <button class="icon-btn" data-close-modal aria-label="Close notifications">×</button>
+        </div>
+        <div class="notification-actions"><button class="text-btn" type="button" id="markAllNotificationsReadBtn">Mark all as read</button></div>
+        <ul class="notification-list" id="notificationsModalList"></ul>
+        <p class="form-state hidden" id="notificationsModalState" role="status"></p>
+      </section>
+    </div>
+
+    <div class="dashboard-toast" id="dashboardToast" role="status" aria-live="polite"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="config.js"></script>
