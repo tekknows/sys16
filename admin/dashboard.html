@@ -50,14 +50,18 @@
           </div>
 
           <div class="topbar-actions">
-            <button class="secondary-btn small-btn" id="syncSystemBtn"><span class="sync-icon" aria-hidden="true">⟳</span> Sync system</button>
+            <button class="secondary-btn small-btn" id="syncSystemBtn"><span class="sync-icon" aria-hidden="true">⟳</span> Sync</button>
             <span class="sync-status" id="syncStatus" role="status">Last sync: Not yet synced</span>
+            <button class="icon-btn notification-bell" id="notificationBellBtn" type="button" aria-label="Notifications" title="Notifications">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12h4"></path></svg>
+            </button>
             <button class="icon-btn theme-toggle" id="themeToggleBtn" aria-label="Switch to dark mode" title="Switch to dark mode">
               <svg class="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path></svg>
               <svg class="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 15.4A8.5 8.5 0 0 1 8.6 3.6 8.7 8.7 0 1 0 20.4 15.4Z"></path></svg>
             </button>
           </div>
         </header>
+        <p id="dashboardDataState" class="dashboard-data-state hidden" role="status"></p>
 
         <section id="dashboard" class="module-panel active">
           <div class="stats-grid" id="statsGrid"></div>
@@ -92,7 +96,6 @@
             <div class="panel-card">
               <div class="card-header">
                 <h3>Notifications</h3>
-                <button class="text-btn" id="dismissNoticeBtn">Don’t show again this session</button>
               </div>
               <ul class="notification-list" id="notificationList"></ul>
             </div>
@@ -123,13 +126,10 @@
               <span class="pill accent">Global + assigned</span>
             </div>
             <form id="scheduleForm" class="form-grid">
+              <input name="ruleId" type="hidden" />
               <label>
                 <span>Website or domain</span>
-                <input name="domain" placeholder="example.com" />
-              </label>
-              <label>
-                <span>Reason</span>
-                <input name="reason" placeholder="Productivity policy" />
+                <input name="domain" placeholder="example.com" required />
               </label>
               <label>
                 <span>Start time</span>
@@ -139,29 +139,21 @@
                 <span>End time</span>
                 <input name="endTime" type="time" value="17:30" />
               </label>
-              <label class="span-2">
+              <div class="span-2 days-field">
                 <span>Days of week</span>
                 <div class="days-row">
-                  <label><input type="checkbox" checked /> Mon</label>
-                  <label><input type="checkbox" checked /> Tue</label>
-                  <label><input type="checkbox" checked /> Wed</label>
-                  <label><input type="checkbox" checked /> Thu</label>
-                  <label><input type="checkbox" checked /> Fri</label>
-                  <label><input type="checkbox" /> Sat</label>
-                  <label><input type="checkbox" /> Sun</label>
+                  <label><input type="checkbox" name="days" value="Mon" checked /> Mon</label>
+                  <label><input type="checkbox" name="days" value="Tue" checked /> Tue</label>
+                  <label><input type="checkbox" name="days" value="Wed" checked /> Wed</label>
+                  <label><input type="checkbox" name="days" value="Thu" checked /> Thu</label>
+                  <label><input type="checkbox" name="days" value="Fri" checked /> Fri</label>
+                  <label><input type="checkbox" name="days" value="Sat" /> Sat</label>
+                  <label><input type="checkbox" name="days" value="Sun" /> Sun</label>
                 </div>
-              </label>
-              <label>
-                <span>Activation date</span>
-                <input name="activateOn" type="date" />
-              </label>
-              <label>
-                <span>Expiration date</span>
-                <input name="expiresOn" type="date" />
-              </label>
+              </div>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Save policy</button>
-                <button type="button" class="secondary-btn">Deploy to all employees</button>
+                <button type="button" class="secondary-btn hidden" id="cancelRuleEditBtn">Cancel edit</button>
               </div>
             </form>
           </div>
@@ -193,19 +185,11 @@
             <form id="assignmentForm" class="form-grid">
               <label>
                 <span>Employee</span>
-                <select id="assignmentEmployee">
-                  <option>Selena Park</option>
-                  <option>David Kim</option>
-                  <option>Priya Shah</option>
-                </select>
+                <select id="assignmentEmployee"><option value="">Select an employee</option></select>
               </label>
               <label>
                 <span>Available laptop</span>
-                <select id="assignmentLaptop">
-                  <option>ML-209</option>
-                  <option>ML-310</option>
-                  <option>ML-512</option>
-                </select>
+                <select id="assignmentLaptop"><option value="">Select an available laptop</option></select>
               </label>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Assign laptop</button>
@@ -443,11 +427,12 @@
                 <div class="panel-card">
                   <h3>Account settings</h3>
                   <form class="form-grid compact" id="changePasswordForm">
-                    <label><span>Administrator email</span><input value="sys@admin.com" /></label>
+                    <label><span>Administrator email</span><input type="email" autocomplete="email" required /></label>
                     <label><span>Current password</span><span class="password-input"><input type="password" autocomplete="current-password" /><button type="button" class="eye-toggle" aria-label="Show current password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <label><span>New password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show new password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <label><span>Confirm password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show confirm password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save changes</button><button type="reset" class="secondary-btn">Cancel</button></div>
+                    <p class="span-2 form-state hidden" id="accountFormState" role="status"></p>
                   </form>
                 </div>
               </div>
@@ -459,7 +444,7 @@
                     <button type="button" class="primary-btn small-btn" id="addRoleAssignmentBtn">Add assignment</button>
                   </div>
                   <form id="roleAssignmentForm" class="form-grid compact hidden">
-                    <label><span>User ID</span><input id="roleUserId" required placeholder="USR-1001" /></label>
+                    <label><span>User ID</span><input id="roleUserId" required placeholder="Enter employee ID" /></label>
                     <label><span>Role</span><select id="roleSelection"><option>Administrator</option><option>IT Staff</option><option>Employee</option></select></label>
                     <div class="span-2 actions-row"><button type="submit" class="primary-btn">Assign role</button><button type="button" class="secondary-btn" id="cancelRoleAssignmentBtn">Cancel</button></div>
                   </form>
@@ -539,6 +524,24 @@
       <section class="modal-card">
         <div class="card-header"><h2 id="createRecordTitle">Add record</h2><button class="icon-btn" data-close-modal aria-label="Close form">×</button></div>
         <form id="createRecordForm" class="form-grid compact"></form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="requestReviewModal" role="dialog" aria-modal="true" aria-labelledby="requestReviewTitle">
+      <section class="modal-card">
+        <div class="card-header"><h2 id="requestReviewTitle">Review change request</h2><button class="icon-btn" data-close-modal aria-label="Close review">×</button></div>
+        <div id="requestReviewDetails"></div>
+        <label><span>Administrator remarks</span><textarea id="requestReviewRemarks" rows="3"></textarea></label>
+        <div class="actions-row"><button class="primary-btn" id="approveRequestBtn" type="button">Approve</button><button class="secondary-btn" id="rejectRequestBtn" type="button">Reject</button></div>
+        <p class="form-state hidden" id="requestReviewState" role="status"></p>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="activityLogsModal" role="dialog" aria-modal="true" aria-labelledby="activityLogsTitle">
+      <section class="modal-card">
+        <div class="card-header"><h2 id="activityLogsTitle">Recent activity logs</h2><button class="icon-btn" data-close-modal aria-label="Close logs">×</button></div>
+        <div class="table-scroll"><table><thead><tr><th>Action</th><th>Module</th><th>When</th></tr></thead><tbody id="activityLogsTable"></tbody></table></div>
+        <p class="form-state hidden" id="activityLogsState" role="status"></p>
       </section>
     </div>
 

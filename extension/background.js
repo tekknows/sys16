@@ -1,11 +1,32 @@
 importScripts('config.js');
 
-const defaultBlockedDomains = ['facebook.com', 'twitter.com', 'youtube.com', 'reddit.com', 'instagram.com'];
 const blockRuleIdStart = 1001;
+const extensionSessionKey = 'mindlock-extension-session';
+const policySyncAlarm = 'mindlock-policy-sync';
 
 async function syncBlockingRules() {
-  const stored = await chrome.storage.local.get(['mindlock-blocked-domains', 'mindlock-blocking-enabled']);
-  const domains = stored['mindlock-blocked-domains']?.length ? stored['mindlock-blocked-domains'] : defaultBlockedDomains;
+  const stored = await chrome.storage.local.get(['mindlock-blocking-enabled']);
+  const session = await getValidExtensionSession();
+  let schedules = [];
+  if (session) {
+    const config = globalThis.MINDLOCK_CONFIG;
+    const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_blocking_rules?is_active=eq.true&select=domain,start_time,end_time,days_of_week`, {
+      headers: {
+        apikey: config.supabaseAnonKey,
+        Authorization: `******`,
+      },
+    });
+    if (!response.ok) throw new Error(`Could not load website policies (${response.status}).`);
+    schedules = await response.json();
+  }
+  const day = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+  const now = new Date().toTimeString().slice(0, 5);
+  const domains = schedules.filter((rule) => {
+    if (!(rule.days_of_week || []).includes(day)) return false;
+    const start = String(rule.start_time).slice(0, 5);
+    const end = String(rule.end_time).slice(0, 5);
+    return start <= end ? now >= start && now <= end : now >= start || now <= end;
+  }).map((rule) => rule.domain);
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
   const addRules = stored['mindlock-blocking-enabled'] === false ? [] : [...new Set(domains)]
@@ -24,22 +45,28 @@ async function syncBlockingRules() {
   });
 }
 
-const extensionSessionKey = 'mindlock-extension-session';
 const notifiedRepliesKey = 'mindlock-notified-replies';
 const notifiedStatusesKey = 'mindlock-notified-ticket-statuses';
 const ticketCheckAlarm = 'mindlock-ticket-reply-check';
 
-chrome.runtime.onInstalled.addListener(() => chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 }));
-chrome.runtime.onStartup.addListener(() => chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 }));
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(policySyncAlarm, { periodInMinutes: 1 });
+});
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(policySyncAlarm, { periodInMinutes: 1 });
+});
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes['mindlock-blocked-domains'] || changes['mindlock-blocking-enabled'])) {
+  if (area === 'local' && (changes[extensionSessionKey] || changes['mindlock-blocking-enabled'])) {
     syncBlockingRules().catch((error) => console.error('Unable to update website blocking rules:', error));
   }
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ticketCheckAlarm) checkForTicketReplies();
+  if (alarm.name === policySyncAlarm) syncBlockingRules().catch((error) => console.error('Unable to refresh website blocking rules:', error));
 });
 
 async function getValidExtensionSession() {

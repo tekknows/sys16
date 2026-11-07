@@ -37,9 +37,17 @@ html, body {
   font-family: Inter, 'Segoe UI', sans-serif;
   background: var(--bg);
   color: var(--text);
+  scrollbar-width: none;
 }
 
-button, input, select {
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar,
+.main-panel::-webkit-scrollbar {
+  display: none;
+}
+
+button, input, select, textarea {
   font: inherit;
 }
 
@@ -146,6 +154,7 @@ button {
 .input-field input,
 .form-grid input,
 .form-grid select,
+textarea,
 .search-input,
 .filter-row select {
   width: 100%;
@@ -235,7 +244,7 @@ button {
   top: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 .sidebar-header {
@@ -345,6 +354,7 @@ button {
   height: 100vh;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: none;
 }
 
 .topbar {
@@ -359,6 +369,55 @@ button {
   gap: 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.notification-bell {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.notification-bell svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.notification-bell[data-count]:not([data-count=""])::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.dashboard-data-state {
+  margin: -12px 0 16px;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.form-state {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.form-state.error-text,
+.dashboard-data-state.error-text {
+  color: var(--danger);
 }
 
 .sync-status {
@@ -597,6 +656,12 @@ button {
 }
 
 .form-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--text-soft);
+}
+
+.days-field {
   display: grid;
   gap: 8px;
   color: var(--text-soft);

@@ -1,56 +1,3 @@
-const DEMO_DATA = {
-  stats: [
-    { label: 'Total employees', value: '147', trend: '+12%' },
-    { label: 'Registered laptops', value: '214', trend: '+7%' },
-    { label: 'Currently assigned', value: '132', trend: '+5%' },
-    { label: 'Available laptops', value: '82', trend: 'Stable' },
-    { label: 'Active schedules', value: '9', trend: '4 today' },
-    { label: 'Blocked websites', value: '76', trend: '+8%' },
-    { label: 'Incognito policy', value: 'Enabled', trend: 'Valid' },
-    { label: 'Open tickets', value: '17', trend: '4 urgent' },
-    { label: 'Pending replacement', value: '4', trend: 'Review' },
-  ],
-  activities: [
-    'Employee integration completed for 5 new laptops.',
-    'Website blocking schedule updated for marketing team.',
-    'Laptop replacement request approved for Selena Park.',
-    'Global Incognito policy successfully synchronized with 42 devices.',
-    'Ticket category retention cleanup executed for 12 closed tickets.',
-  ],
-  notifications: [
-    { title: 'Ticket escalated', text: 'Ticket #MND-643 was assigned to IT Ops.' },
-    { title: 'Policy update', text: 'Workday scheduling block is now active for all eligible devices.' },
-    { title: 'Laptop replacement', text: 'Replacement device for David Kim is ready for collection.' },
-  ],
-  blocking: [
-    { name: 'Social media limit', scope: 'Global', time: '09:00 - 17:30', status: 'Active' },
-    { name: 'News and media block', scope: 'Assigned', time: '08:00 - 18:00', status: 'Scheduled' },
-    { name: 'Streaming restriction', scope: 'Individual', time: 'All day', status: 'Paused' },
-  ],
-  assignments: [
-    { userId: 'USR-1001', employee: 'Selena Park', laptop: 'ML-209', date: '2026-10-15', status: 'Active' },
-    { userId: 'USR-1002', employee: 'David Kim', laptop: 'ML-310', date: '2026-09-29', status: 'Active' },
-    { userId: 'USR-1003', employee: 'Priya Shah', laptop: 'ML-512', date: '2026-10-02', status: 'Terminated' },
-  ],
-  requests: [
-    { employee: 'Selena Park', type: 'Laptop Replacement', reason: 'Battery swelling reported by employee.', status: 'Pending' },
-    { employee: 'David Kim', type: 'Reassignment', reason: 'Requested a better workstation setup.', status: 'Approved' },
-    { employee: 'Priya Shah', type: 'Account Access', reason: 'Need broader access to project tasks.', status: 'Rejected' },
-  ],
-  employees: [
-    { userId: 'USR-1001', name: 'Selena Park', email: 'selena.park@mindlock.com', department: 'Operations', position: 'Operations Manager', role: 'Administrator', laptop: 'ML-209', status: 'Active' },
-    { userId: 'USR-1002', name: 'David Kim', email: 'david.kim@mindlock.com', department: 'Engineering', position: 'Software Engineer', role: 'Employee', laptop: 'ML-310', status: 'Active' },
-    { userId: 'USR-1003', name: 'Priya Shah', email: 'priya.shah@mindlock.com', department: 'Marketing', position: 'Marketing Specialist', role: 'IT Staff', laptop: 'ML-512', status: 'Suspended' },
-    { userId: 'USR-1004', name: 'Morgan Lee', email: 'morgan.lee@mindlock.com', department: 'Support', position: 'Support Associate', role: 'Employee', laptop: '', status: 'Active' },
-  ],
-  laptops: [
-    { id: 'ML-209', model: 'Dell Latitude 7440', status: 'Assigned', assignment: 'Selena Park', sync: '2 min ago' },
-    { id: 'ML-310', model: 'HP EliteBook 845', status: 'Assigned', assignment: 'David Kim', sync: '5 min ago' },
-    { id: 'ML-512', model: 'Lenovo ThinkPad T14', status: 'Maintenance', assignment: 'Priya Shah', sync: '1 day ago' },
-    { id: 'ML-513', model: 'Dell Latitude 5450', status: 'Available', assignment: 'Unassigned', sync: 'Never' },
-  ],
-};
-
 const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
 
 const TICKET_PAGE_SIZE = 10;
@@ -66,6 +13,14 @@ let ticketListRealtimeChannel = null;
 let ticketPollTimer = null;
 let analyticsMetric = 'time';
 let analyticsRecords = [];
+let directoryEmployees = [];
+let directoryLaptops = [];
+let directoryAssignments = [];
+let blockingRules = [];
+let changeRequests = [];
+let activityLogs = [];
+let notifications = [];
+let selectedChangeRequest = null;
 
 function isSupabaseConfigured() {
   const config = window.MINDLOCK_CONFIG;
@@ -84,9 +39,9 @@ function getSupabaseClient() {
 function readState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEYS.settings);
-    return saved ? JSON.parse(saved) : { theme: 'light', accent: '#2563eb', incognitoEnabled: false, notificationsHidden: false };
+    return saved ? JSON.parse(saved) : { theme: 'light', accent: '#2563eb', incognitoEnabled: false };
   } catch (error) {
-    return { theme: 'light', accent: '#2563eb', incognitoEnabled: false, notificationsHidden: false };
+    return { theme: 'light', accent: '#2563eb', incognitoEnabled: false };
   }
 }
 
@@ -163,7 +118,6 @@ async function handleLogin(ev) {
     localStorage.removeItem('mindlock-remember-admin');
   }
 
-  sessionStorage.setItem('mindlock-show-update-logs-after-login', 'true');
   window.location.href = 'dashboard.html';
 }
 
@@ -197,61 +151,57 @@ function renderMetricCards() {
   const statsGrid = document.getElementById('statsGrid');
   if (!statsGrid) return;
 
-  statsGrid.innerHTML = DEMO_DATA.stats
-    .map(
-      (stat) => `
-        <article class="stat-card">
-          <span class="metric-label">${stat.label}</span>
-          <strong class="metric-value">${stat.value}</strong>
-          <span class="metric-trend ${stat.trend.includes('Review') || stat.trend.includes('Open') ? 'warning' : 'positive'}">${stat.trend}</span>
-        </article>
-      `,
-    )
-    .join('');
+  const activeAssignments = directoryAssignments.filter((row) => row.status === 'Active').length;
+  const stats = [
+    ['Employees', directoryEmployees.length],
+    ['Laptops', directoryLaptops.length],
+    ['Assigned laptops', activeAssignments],
+    ['Available laptops', directoryLaptops.filter((row) => row.status === 'Available').length],
+    ['Blocking policies', blockingRules.length],
+    ['Pending requests', changeRequests.filter((row) => row.status === 'Pending').length],
+  ];
+  statsGrid.innerHTML = stats.map(([label, value]) => `
+    <article class="stat-card"><span class="metric-label">${label}</span><strong class="metric-value">${value}</strong></article>
+  `).join('');
 }
 
 function renderActivityList() {
   const activityList = document.getElementById('activityList');
   if (!activityList) return;
-  activityList.innerHTML = DEMO_DATA.activities
-    .map(
-      (item) => `
-        <li>
-          <span class="dot"></span>
-          <span>${item}</span>
-        </li>
-      `,
-    )
-    .join('');
+  activityList.innerHTML = activityLogs.length
+    ? activityLogs.map((item) => `<li><span class="dot"></span><span>${escapeHtml(item.action)} · ${escapeHtml(item.module_name)} · ${escapeHtml(formatDate(item.created_at))}</span></li>`).join('')
+    : '<li>No recent activity recorded.</li>';
 }
 
 function renderNotifications() {
   const container = document.getElementById('notificationList');
   if (!container) return;
 
-  container.innerHTML = DEMO_DATA.notifications
-    .map(
-      (item) => `
-        <li>
-          <strong>${item.title}</strong>
-          <small>${item.text}</small>
-        </li>
-      `,
-    )
-    .join('');
+  container.innerHTML = notifications.length
+    ? notifications.map((item) => `<li><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.body)}</small></li>`).join('')
+    : '<li>No notifications.</li>';
 }
 
 function renderBarChart() {
   const usageChart = document.getElementById('usageChart');
   if (!usageChart) return;
 
-  const data = [72, 84, 58, 96, 66, 88, 81];
+  const data = analyticsRecords.length
+    ? Array.from({ length: 7 }, (_, index) => {
+      const day = new Date();
+      day.setDate(day.getDate() - (6 - index));
+      const dateKey = day.toISOString().slice(0, 10);
+      return analyticsRecords.filter((row) => String(row.recorded_at).slice(0, 10) === dateKey)
+        .reduce((sum, row) => sum + Number(row.total_seconds || 0) / 60, 0);
+    })
+    : Array(7).fill(0);
+  const max = Math.max(...data, 1);
   usageChart.innerHTML = data
     .map(
-      (value) => `
+      (value, index) => `
         <div class="bar-group">
-          <span style="height:${value}%" title="${value}%"></span>
-          <small>${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][data.indexOf(value)]}</small>
+          <span style="height:${Math.max(value ? (value / max) * 100 : 0, 2)}%" title="${value} minutes"></span>
+          <small>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.now() - (6 - index) * 86400000).getDay()]}</small>
         </div>
       `,
     )
@@ -280,89 +230,70 @@ function renderAnalytics() {
 function renderTicketLegend() {
   const container = document.getElementById('ticketLegend');
   if (!container) return;
-
-  const items = [
-    { label: 'Open', value: '58%', color: '#ef4444' },
-    { label: 'In progress', value: '22%', color: '#f59e0b' },
-    { label: 'Resolved', value: '15%', color: '#10b981' },
-    { label: 'Closed', value: '5%', color: '#3b82f6' },
-  ];
-
-  container.innerHTML = items
-    .map(
-      (item) => `
-        <div class="legend-item">
-          <span class="legend-dot" style="background:${item.color}"></span>
-          <span>${item.label}</span>
-          <strong>${item.value}</strong>
-        </div>
-      `,
-    )
-    .join('');
+  container.innerHTML = `<div class="legend-item"><span>Tickets</span><strong>${ticketCount}</strong></div>`;
 }
 
 function renderBlockingTable() {
   const table = document.getElementById('blockingTable');
   if (!table) return;
-  table.innerHTML = DEMO_DATA.blocking
-    .map(
-      (row) => `
+  table.innerHTML = blockingRules.length ? blockingRules.map((row) => {
+    const days = (row.days_of_week || []).join(', ') || 'Every day';
+    const now = new Date();
+    const day = now.toLocaleDateString('en-US', { weekday: 'short' });
+    const time = now.toTimeString().slice(0, 5);
+    const start = row.start_time.slice(0, 5);
+    const end = row.end_time.slice(0, 5);
+    const inTimeRange = start <= end ? time >= start && time <= end : time >= start || time <= end;
+    const status = !row.is_active ? 'Paused' : (row.days_of_week || []).includes(day) && inTimeRange ? 'Active' : 'Scheduled';
+    return `
         <tr>
-          <td>${row.name}</td>
-          <td>${row.scope}</td>
-          <td>${row.time}</td>
-          <td><span class="status-pill ${row.status.toLowerCase() === 'active' ? 'success' : row.status.toLowerCase() === 'scheduled' ? 'warning' : 'neutral'}">${row.status}</span></td>
-          <td><button class="text-btn">Edit</button></td>
+          <td>${escapeHtml(row.domain)}</td>
+          <td>Global</td>
+          <td>${escapeHtml(row.start_time.slice(0, 5))} - ${escapeHtml(row.end_time.slice(0, 5))}<small>${escapeHtml(days)}</small></td>
+          <td><span class="status-pill ${status === 'Active' ? 'success' : status === 'Scheduled' ? 'warning' : 'neutral'}">${status}</span></td>
+          <td><button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button></td>
         </tr>
-      `,
-    )
-    .join('');
+      `;
+  }).join('') : '<tr><td colspan="5">No website blocking policies configured.</td></tr>';
 }
 
 function renderAssignmentTable() {
   const table = document.getElementById('assignmentTable');
   if (!table) return;
-  table.innerHTML = DEMO_DATA.assignments
-    .map(
-      (row) => `
+  table.innerHTML = directoryAssignments.length ? directoryAssignments.map((row) => `
         <tr>
-          <td><button class="text-btn user-details-btn" data-user-id="${escapeHtml(row.userId)}">${escapeHtml(row.userId)}</button></td>
-          <td>${escapeHtml(row.employee)}</td>
-          <td>${escapeHtml(row.laptop)}</td>
-          <td>${escapeHtml(row.date)}</td>
-          <td><span class="status-pill ${row.status === 'Active' ? 'success' : 'neutral'}">${row.status}</span></td>
+          <td><button class="text-btn user-details-btn" data-user-id="${escapeHtml(row.employee.user_id)}">${escapeHtml(row.employee.user_id)}</button></td>
+          <td>${escapeHtml(row.employee.name)}</td>
+          <td>${escapeHtml(row.laptop.laptop_id)}</td>
+          <td>${escapeHtml(formatDate(row.assigned_at))}</td>
+          <td><span class="status-pill ${row.status === 'Active' ? 'success' : 'neutral'}">${escapeHtml(row.status)}</span></td>
         </tr>
-      `,
-    )
-    .join('');
+      `).join('') : '<tr><td colspan="5">No laptop assignments.</td></tr>';
 }
 
 function renderAssignmentOptions() {
   const employeeSelect = document.getElementById('assignmentEmployee');
   const laptopSelect = document.getElementById('assignmentLaptop');
   if (!employeeSelect || !laptopSelect) return;
-  const employees = DEMO_DATA.employees.filter((row) => row.status === 'Active' && !row.laptop);
-  const laptops = DEMO_DATA.laptops.filter((row) => row.status === 'Available');
-  employeeSelect.innerHTML = `<option value="">Select an employee</option>${employees.map((row) => `<option>${escapeHtml(row.name)}</option>`).join('')}`;
-  laptopSelect.innerHTML = `<option value="">Select an available laptop</option>${laptops.map((row) => `<option>${escapeHtml(row.id)}</option>`).join('')}`;
+  const assignedEmployeeIds = new Set(directoryAssignments.filter((row) => row.status === 'Active').map((row) => row.employee.id));
+  const employees = directoryEmployees.filter((row) => row.active && !assignedEmployeeIds.has(row.id));
+  const laptops = directoryLaptops.filter((row) => row.status === 'Available');
+  employeeSelect.innerHTML = `<option value="">Select an employee</option>${employees.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)}</option>`).join('')}`;
+  laptopSelect.innerHTML = `<option value="">Select an available laptop</option>${laptops.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.laptop_id)}</option>`).join('')}`;
 }
 
 function renderRequestTable() {
   const table = document.getElementById('requestTable');
   if (!table) return;
-  table.innerHTML = DEMO_DATA.requests
-    .map(
-      (row) => `
+  table.innerHTML = changeRequests.length ? changeRequests.map((row) => `
         <tr>
-          <td>${row.employee}</td>
-          <td>${row.type}</td>
-          <td>${row.reason}</td>
-          <td><span class="status-pill ${row.status === 'Approved' ? 'success' : row.status === 'Pending' ? 'warning' : 'neutral'}">${row.status}</span></td>
-          <td><button class="text-btn">Review</button></td>
+          <td>${escapeHtml(row.employeeName || 'Unknown employee')}</td>
+          <td>${escapeHtml(row.request_type)}</td>
+          <td>${escapeHtml(row.reason)}</td>
+          <td><span class="status-pill ${row.status === 'Approved' ? 'success' : row.status === 'Pending' ? 'warning' : 'neutral'}">${escapeHtml(row.status)}</span></td>
+          <td><button class="text-btn review-change-request" type="button" data-request-id="${escapeHtml(row.id)}">Review</button></td>
         </tr>
-      `,
-    )
-    .join('');
+      `).join('') : '<tr><td colspan="5">No change requests.</td></tr>';
 }
 
 function renderEmployeeTable() {
@@ -370,17 +301,17 @@ function renderEmployeeTable() {
   if (!table) return;
   const query = (document.getElementById('employeeSearch')?.value || '').trim().toLowerCase();
   const status = document.getElementById('employeeStatusFilter')?.value || '';
-  table.innerHTML = DEMO_DATA.employees
-    .filter((row) => (!status || row.status === status) && (!query || `${row.userId} ${row.name} ${row.department} ${row.email}`.toLowerCase().includes(query)))
+  table.innerHTML = directoryEmployees
+    .filter((row) => (!status || (row.active ? 'Active' : 'Suspended') === status) && (!query || `${row.user_id} ${row.name} ${row.department} ${row.email}`.toLowerCase().includes(query)))
     .map(
       (row) => `
         <tr>
-          <td>${escapeHtml(row.userId)}</td>
+          <td>${escapeHtml(row.user_id)}</td>
           <td>${escapeHtml(row.name)}</td>
           <td>${escapeHtml(row.department)}</td>
-          <td>${escapeHtml(row.role)}</td>
-          <td>${escapeHtml(row.laptop || 'Unassigned')}</td>
-          <td><span class="status-pill ${row.status === 'Active' ? 'success' : 'neutral'}">${escapeHtml(row.status)}</span></td>
+          <td>${escapeHtml(row.role || 'Employee')}</td>
+          <td>${escapeHtml(directoryAssignments.find((assignment) => assignment.employee.id === row.id && assignment.status === 'Active')?.laptop.laptop_id || 'Unassigned')}</td>
+          <td><span class="status-pill ${row.active ? 'success' : 'neutral'}">${row.active ? 'Active' : 'Suspended'}</span></td>
         </tr>
       `,
     )
@@ -390,8 +321,8 @@ function renderEmployeeTable() {
 function renderUserRoleAssignments() {
   const table = document.getElementById('userRoleAssignments');
   if (!table) return;
-  table.innerHTML = DEMO_DATA.employees.map((employee) => `
-    <tr><td>${escapeHtml(employee.userId)}</td><td>${escapeHtml(employee.name)}</td><td>${escapeHtml(employee.role)}</td></tr>
+  table.innerHTML = directoryEmployees.map((employee) => `
+    <tr><td>${escapeHtml(employee.user_id)}</td><td>${escapeHtml(employee.name)}</td><td>${escapeHtml(employee.role || 'Employee')}</td></tr>
   `).join('');
 }
 
@@ -400,20 +331,118 @@ function renderLaptopTable() {
   if (!table) return;
   const query = (document.getElementById('laptopSearch')?.value || '').trim().toLowerCase();
   const status = document.getElementById('laptopStatusFilter')?.value || '';
-  table.innerHTML = DEMO_DATA.laptops
-    .filter((row) => (!status || row.status === status) && (!query || `${row.id} ${row.model} ${row.assignment}`.toLowerCase().includes(query)))
+  table.innerHTML = directoryLaptops
+    .filter((row) => (!status || row.status === status) && (!query || `${row.laptop_id} ${row.model}`.toLowerCase().includes(query)))
     .map(
       (row) => `
         <tr>
-          <td>${escapeHtml(row.id)}</td>
+          <td>${escapeHtml(row.laptop_id)}</td>
           <td>${escapeHtml(row.model)}</td>
           <td><span class="status-pill ${row.status === 'Assigned' ? 'success' : row.status === 'Maintenance' ? 'warning' : 'neutral'}">${escapeHtml(row.status)}</span></td>
-          <td>${escapeHtml(row.assignment)}</td>
-          <td>${escapeHtml(row.sync)}</td>
+          <td>${escapeHtml(directoryAssignments.find((assignment) => assignment.laptop.id === row.id && assignment.status === 'Active')?.employee.name || 'Unassigned')}</td>
+          <td>${escapeHtml(row.last_sync_at ? formatDate(row.last_sync_at) : 'Never')}</td>
         </tr>
       `,
     )
-    .join('');
+    .join('') || '<tr><td colspan="5">No laptops registered.</td></tr>';
+}
+
+function setDashboardState(message, isError = false) {
+  const state = document.getElementById('dashboardDataState');
+  if (!state) return;
+  state.textContent = message;
+  state.classList.toggle('error-text', isError);
+  state.classList.toggle('hidden', !message);
+}
+
+async function loadDashboardData() {
+  const client = getSupabaseClient();
+  if (!client || !adminUser) return;
+  setDashboardState('Loading dashboard data…');
+  try {
+    const results = await Promise.all([
+      client.from('employees').select('id,profile_id,user_id,department,position,active').order('created_at', { ascending: false }),
+      client.from('profiles').select('id,full_name,email,department,position'),
+      client.from('user_roles').select('profile_id,role_name').is('revoked_at', null),
+      client.from('laptops').select('id,laptop_id,model,status,last_sync_at').order('created_at', { ascending: false }),
+      client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at').order('assigned_at', { ascending: false }),
+      client.from('website_blocking_rules').select('id,domain,start_time,end_time,days_of_week,is_active').order('created_at', { ascending: false }),
+      client.from('laptop_change_requests').select('id,profile_id,request_type,reason,status,created_at').order('created_at', { ascending: false }).limit(100),
+      client.from('change_logs').select('id,action,module_name,created_at').order('created_at', { ascending: false }).limit(8),
+      client.from('notifications').select('id,title,body,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
+    ]);
+    const failed = results.find((result) => result.error);
+    if (failed?.error) throw failed.error;
+    const [employeeResult, profileResult, roleResult, laptopResult, assignmentResult, ruleResult, requestResult, logResult, notificationResult] = results;
+    const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
+    const roles = new Map((roleResult.data || []).map((role) => [role.profile_id, role.role_name]));
+    directoryEmployees = (employeeResult.data || []).map((employee) => {
+      const profile = profiles.get(employee.profile_id) || {};
+      return {
+        ...employee,
+        userId: employee.user_id,
+        name: profile.full_name || 'Unknown employee',
+        email: profile.email || '',
+        department: employee.department || profile.department || '',
+        position: employee.position || profile.position || '',
+        role: roles.get(employee.profile_id) || 'Employee',
+      };
+    });
+    directoryLaptops = laptopResult.data || [];
+    const employeesById = new Map(directoryEmployees.map((employee) => [employee.id, employee]));
+    const laptopsById = new Map(directoryLaptops.map((laptop) => [laptop.id, laptop]));
+    directoryAssignments = (assignmentResult.data || [])
+      .filter((assignment) => employeesById.has(assignment.employee_id) && laptopsById.has(assignment.laptop_id))
+      .map((assignment) => ({
+        ...assignment,
+        employee: employeesById.get(assignment.employee_id),
+        laptop: laptopsById.get(assignment.laptop_id),
+      }));
+    blockingRules = ruleResult.data || [];
+    const requestProfiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile.full_name]));
+    changeRequests = (requestResult.data || []).map((request) => ({
+      ...request,
+      employeeName: requestProfiles.get(request.profile_id) || 'Unknown employee',
+    }));
+    activityLogs = logResult.data || [];
+    notifications = notificationResult.data || [];
+    renderMetricCards();
+    renderActivityList();
+    renderNotifications();
+    renderBlockingTable();
+    renderAssignmentTable();
+    renderAssignmentOptions();
+    renderRequestTable();
+    renderEmployeeTable();
+    renderUserRoleAssignments();
+    renderLaptopTable();
+    updateNotificationBell();
+    setDashboardState('');
+  } catch (error) {
+    setDashboardState(`Dashboard data could not be loaded: ${error.message}`, true);
+  }
+}
+
+function updateNotificationBell() {
+  const button = document.getElementById('notificationBellBtn');
+  const unread = notifications.filter((notification) => !notification.is_read).length;
+  if (!button) return;
+  button.setAttribute('aria-label', unread ? `${unread} unread notifications` : 'Notifications');
+  button.dataset.count = unread ? String(unread) : '';
+}
+
+async function writeChangeLog(action, moduleName, recordId = null, previousValue = null, newValue = null) {
+  const client = getSupabaseClient();
+  if (!client || !adminUser) return;
+  const { error } = await client.from('change_logs').insert({
+    user_id: adminUser.id,
+    action,
+    module_name: moduleName,
+    affected_record_id: recordId ? String(recordId) : null,
+    previous_value: previousValue,
+    new_value: newValue,
+  });
+  if (error) throw new Error(`The operation was saved, but its activity log could not be written: ${error.message}`);
 }
 
 function renderTicketTable() {
@@ -453,6 +482,15 @@ async function ensureAdminSession() {
       return false;
     }
     adminUser = { id: sessionData.session.user.id, email: sessionData.session.user.email, role };
+    const emailInput = document.querySelector('#changePasswordForm input[type="email"]');
+    if (emailInput) emailInput.value = adminUser.email || '';
+    const profileUpdate = await client.from('profiles')
+      .update({ email: adminUser.email })
+      .eq('id', adminUser.id)
+      .neq('email', adminUser.email);
+    if (profileUpdate.error) {
+      setDashboardState(`Profile email could not be synchronized: ${profileUpdate.error.message}`, true);
+    }
     return true;
   }
   window.location.href = 'index.html';
@@ -513,6 +551,7 @@ async function loadTickets() {
 
   ticketsOnPage = data || [];
   ticketCount = count || 0;
+  renderTicketLegend();
   if (ticketsOnPage.length) {
     const ids = ticketsOnPage.map((ticket) => ticket.id);
     const { data: unreadMessages, error: unreadError } = await client
@@ -838,6 +877,7 @@ async function loadAnalyticsData() {
   analyticsRecords = data || [];
   state.classList.remove('error-text');
   renderAnalyticsData(analyticsRecords);
+  renderBarChart();
 }
 
 function renderAnalyticsData(records) {
@@ -907,7 +947,7 @@ async function syncSystem() {
   button.classList.add('is-syncing');
   status.textContent = 'Syncing system…';
   try {
-    await Promise.all([loadTickets(), loadAnalyticsData()]);
+    await Promise.all([loadDashboardData(), loadTickets(), loadAnalyticsData()]);
     status.textContent = `Last sync: ${formatDate(new Date().toISOString())}`;
   } catch (error) {
     status.textContent = `Sync failed: ${error.message}`;
@@ -998,6 +1038,44 @@ function setupDashboardInteractions() {
     });
   });
   document.getElementById('versionButton')?.addEventListener('click', () => document.getElementById('updateLogsModal')?.classList.remove('hidden'));
+  document.getElementById('showLogsBtn')?.addEventListener('click', async () => {
+    const modal = document.getElementById('activityLogsModal');
+    const table = document.getElementById('activityLogsTable');
+    const state = document.getElementById('activityLogsState');
+    modal.classList.remove('hidden');
+    table.innerHTML = '';
+    state.textContent = 'Loading logs…';
+    state.classList.remove('hidden', 'error-text');
+    try {
+      const { data, error } = await getSupabaseClient().from('change_logs')
+        .select('id,action,module_name,affected_record_id,created_at')
+        .order('created_at', { ascending: false }).limit(100);
+      if (error) throw error;
+      table.innerHTML = data.length ? data.map((log) => `
+        <tr><td>${escapeHtml(log.action)}${log.affected_record_id ? ` (${escapeHtml(log.affected_record_id)})` : ''}</td>
+        <td>${escapeHtml(log.module_name)}</td><td>${escapeHtml(formatDate(log.created_at))}</td></tr>
+      `).join('') : '<tr><td colspan="3">No activity logs.</td></tr>';
+      state.classList.add('hidden');
+    } catch (error) {
+      state.textContent = `Logs could not be loaded: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    }
+  });
+  document.getElementById('notificationBellBtn')?.addEventListener('click', async () => {
+    document.getElementById('notificationList')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const unreadIds = notifications.filter((notification) => !notification.is_read).map((notification) => notification.id);
+    if (!unreadIds.length) return;
+    try {
+      const { error } = await getSupabaseClient().from('notifications').update({ is_read: true }).in('id', unreadIds);
+      if (error) throw error;
+      notifications = notifications.map((notification) => ({ ...notification, is_read: true }));
+      renderNotifications();
+      updateNotificationBell();
+    } catch (error) {
+      setDashboardState(`Notifications could not be marked read: ${error.message}`, true);
+    }
+  });
 
   document.querySelectorAll('.eye-toggle').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1008,16 +1086,71 @@ function setupDashboardInteractions() {
       button.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} ${password.getAttribute('autocomplete').replace('-', ' ')} password`);
     });
   });
-  document.getElementById('changePasswordForm')?.addEventListener('submit', (event) => {
+  document.getElementById('changePasswordForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fields = [...event.currentTarget.querySelectorAll('input[type="password"]')];
-    if (fields[1].value !== fields[2].value) {
-      fields[2].setCustomValidity('Passwords do not match.');
-      fields[2].reportValidity();
+    const form = event.currentTarget;
+    const emailInput = form.querySelector('input[type="email"]');
+    const state = document.getElementById('accountFormState');
+    const submit = form.querySelector('button[type="submit"]');
+    const [currentPassword, newPassword, confirmPassword] = fields;
+    const showState = (message, isError = false) => {
+      state.textContent = message;
+      state.classList.remove('hidden');
+      state.classList.toggle('error-text', isError);
+    };
+    if (newPassword.value && newPassword.value !== confirmPassword.value) {
+      confirmPassword.setCustomValidity('Passwords do not match.');
+      confirmPassword.reportValidity();
       return;
     }
-    fields[2].setCustomValidity('');
-    alert('Password form validated. Connect Supabase Auth to save the password securely.');
+    if (newPassword.value && newPassword.value.length < 8) {
+      newPassword.setCustomValidity('Use at least 8 characters.');
+      newPassword.reportValidity();
+      return;
+    }
+    confirmPassword.setCustomValidity('');
+    newPassword.setCustomValidity('');
+    submit.disabled = true;
+    state.classList.add('hidden');
+    try {
+      const client = getSupabaseClient();
+      const { error: verifyError } = await client.auth.signInWithPassword({
+        email: adminUser.email,
+        password: currentPassword.value,
+      });
+      document.getElementById('changePasswordForm')?.addEventListener('reset', (event) => {
+        const form = event.currentTarget;
+        window.setTimeout(() => {
+          form.querySelector('input[type="email"]').value = adminUser.email || '';
+          document.getElementById('accountFormState').classList.add('hidden');
+        }, 0);
+      });
+      if (verifyError) throw new Error(`Current password was not accepted: ${verifyError.message}`);
+      const updates = {};
+      if (emailInput.value.trim() !== adminUser.email) updates.email = emailInput.value.trim();
+      if (newPassword.value) updates.password = newPassword.value;
+      if (!Object.keys(updates).length) {
+        showState('No account changes to save.');
+        return;
+      }
+      const { data, error } = await client.auth.updateUser(updates);
+      if (error) throw error;
+      adminUser.email = data.user.email;
+      emailInput.value = adminUser.email;
+      if (data.user.email === updates.email && updates.email) {
+        const { error: profileError } = await client.from('profiles').update({ email: data.user.email }).eq('id', adminUser.id);
+        if (profileError) throw profileError;
+      }
+      fields.forEach((field) => { field.value = ''; });
+      showState(updates.email && data.user.email !== updates.email
+        ? 'Password updated. Confirm the email change using the message sent to the new address.'
+        : 'Account changes saved.');
+    } catch (error) {
+      showState(`Account changes failed: ${error.message}`, true);
+    } finally {
+      submit.disabled = false;
+    }
   });
   document.querySelectorAll('#changePasswordForm input[autocomplete="new-password"]').forEach((input) => {
     input.addEventListener('input', (event) => event.currentTarget.setCustomValidity(''));
@@ -1059,51 +1192,100 @@ function setupDashboardInteractions() {
     });
   });
 
-  const dismissNoticeBtn = document.getElementById('dismissNoticeBtn');
-  if (dismissNoticeBtn) {
-    dismissNoticeBtn.addEventListener('click', () => {
-      sessionStorage.setItem('mindlock-notifications-hidden', 'true');
-      const notificationList = document.getElementById('notificationList');
-      if (notificationList) {
-        notificationList.innerHTML = '<li><strong>Notifications hidden for this session.</strong></li>';
+  const scheduleForm = document.getElementById('scheduleForm');
+  if (scheduleForm) {
+    const resetRuleForm = () => {
+      scheduleForm.reset();
+      scheduleForm.elements.ruleId.value = '';
+      document.getElementById('cancelRuleEditBtn').classList.add('hidden');
+    };
+    document.getElementById('cancelRuleEditBtn')?.addEventListener('click', resetRuleForm);
+    scheduleForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(scheduleForm);
+      const domain = String(formData.get('domain') || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+      const days = formData.getAll('days');
+      if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain)) {
+        scheduleForm.elements.domain.setCustomValidity('Enter a valid website domain without a path.');
+        scheduleForm.elements.domain.reportValidity();
+        return;
+      }
+      scheduleForm.elements.domain.setCustomValidity('');
+      if (!days.length) {
+        setDashboardState('Select at least one day for this blocking schedule.', true);
+        return;
+      }
+      const ruleId = String(formData.get('ruleId') || '');
+      const priorRule = blockingRules.find((rule) => rule.id === ruleId);
+      const values = {
+        domain,
+        start_time: formData.get('startTime'),
+        end_time: formData.get('endTime'),
+        days_of_week: days,
+        is_active: priorRule?.is_active ?? true,
+        created_by: adminUser.id,
+      };
+      const submit = scheduleForm.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      try {
+        const query = ruleId
+          ? await getSupabaseClient().from('website_blocking_rules').update(values).eq('id', ruleId)
+          : await getSupabaseClient().from('website_blocking_rules').insert(values);
+        if (query.error) throw query.error;
+        await writeChangeLog(ruleId ? 'Updated blocking schedule' : 'Created blocking schedule', 'Website blocking', ruleId || domain);
+        resetRuleForm();
+        await loadDashboardData();
+        setDashboardState(`Policy saved for ${domain}.`);
+      } catch (error) {
+        setDashboardState(`Website policy could not be saved: ${error.message}`, true);
+      } finally {
+        submit.disabled = false;
       }
     });
   }
-
-  const scheduleForm = document.getElementById('scheduleForm');
-  if (scheduleForm) {
-    scheduleForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const domain = new FormData(scheduleForm).get('domain');
-      alert(`Blocking policy saved for ${domain || 'the selected domain'}.`);
+  document.getElementById('blockingTable')?.addEventListener('click', (event) => {
+    const button = event.target.closest('.edit-blocking-rule');
+    if (!button) return;
+    const rule = blockingRules.find((row) => row.id === button.dataset.ruleId);
+    if (!rule) return;
+    const form = document.getElementById('scheduleForm');
+    form.elements.ruleId.value = rule.id;
+    form.elements.domain.value = rule.domain;
+    form.elements.startTime.value = rule.start_time.slice(0, 5);
+    form.elements.endTime.value = rule.end_time.slice(0, 5);
+    form.querySelectorAll('input[name="days"]').forEach((input) => {
+      input.checked = (rule.days_of_week || []).includes(input.value);
     });
-  }
+    document.getElementById('cancelRuleEditBtn').classList.remove('hidden');
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
 
   const assignmentForm = document.getElementById('assignmentForm');
   if (assignmentForm) {
-    assignmentForm.addEventListener('submit', (event) => {
+    assignmentForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const employee = document.getElementById('assignmentEmployee').value;
-      const laptop = document.getElementById('assignmentLaptop').value;
-      const profile = DEMO_DATA.employees.find((row) => row.name === employee);
-      const device = DEMO_DATA.laptops.find((row) => row.id === laptop);
-      if (!profile || !device || device.status !== 'Available') {
-        alert('Choose an active employee and an available laptop.');
+      const employeeId = document.getElementById('assignmentEmployee').value;
+      const laptopId = document.getElementById('assignmentLaptop').value;
+      const employee = directoryEmployees.find((row) => row.id === employeeId);
+      const laptop = directoryLaptops.find((row) => row.id === laptopId);
+      if (!employee || !laptop || laptop.status !== 'Available' || !employee.active) {
+        setDashboardState('Choose an active employee and an available laptop.', true);
         return;
       }
-      if (DEMO_DATA.assignments.some((row) => row.userId === profile.userId && row.status === 'Active')) {
-        alert('This employee already has an active laptop assignment.');
-        return;
+      try {
+        const { error } = await getSupabaseClient().from('laptop_assignments').insert({
+          employee_id: employee.id,
+          laptop_id: laptop.id,
+          assigned_by: adminUser.id,
+          status: 'Active',
+        });
+        if (error) throw error;
+        await writeChangeLog('Assigned laptop', 'Assignments', laptop.laptop_id);
+        await loadDashboardData();
+        setDashboardState(`Laptop ${laptop.laptop_id} assigned to ${employee.name}.`);
+      } catch (error) {
+        setDashboardState(`Laptop assignment failed: ${error.message}`, true);
       }
-      device.status = 'Assigned';
-      device.assignment = profile.name;
-      profile.laptop = device.id;
-      DEMO_DATA.assignments.push({ userId: profile.userId, employee: profile.name, laptop: device.id, date: new Date().toISOString().slice(0, 10), status: 'Active' });
-      renderAssignmentTable();
-      renderLaptopTable();
-      renderEmployeeTable();
-      renderAssignmentOptions();
-      alert(`Laptop ${laptop} assigned to ${employee}.`);
     });
   }
   document.getElementById('reassignHistoryBtn')?.addEventListener('click', () => {
@@ -1116,21 +1298,22 @@ function setupDashboardInteractions() {
   document.getElementById('assignmentTable')?.addEventListener('click', (event) => {
     const button = event.target.closest('.user-details-btn');
     if (!button) return;
-    const profile = DEMO_DATA.employees.find((row) => row.userId === button.dataset.userId);
-    const device = DEMO_DATA.laptops.find((row) => row.id === profile?.laptop);
+    const profile = directoryEmployees.find((row) => row.user_id === button.dataset.userId);
+    const assignment = directoryAssignments.find((row) => row.employee.id === profile?.id && row.status === 'Active');
+    const device = assignment?.laptop;
     if (!profile) return;
     const details = {
-      'User ID': profile.userId,
+      'User ID': profile.user_id,
       'Full name': profile.name,
       Email: profile.email,
       Department: profile.department,
       Position: profile.position,
       Role: profile.role,
-      'Account status': profile.status,
-      'Assigned laptop': device?.id || 'Unassigned',
+      'Account status': profile.active ? 'Active' : 'Suspended',
+      'Assigned laptop': device?.laptop_id || 'Unassigned',
       Model: device?.model || '—',
       'Laptop status': device?.status || '—',
-      'Last sync': device?.sync || '—',
+      'Last sync': device?.last_sync_at ? formatDate(device.last_sync_at) : '—',
     };
     document.getElementById('userDetailsContent').innerHTML = Object.entries(details)
       .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('');
@@ -1242,23 +1425,42 @@ function setupDashboardInteractions() {
 
   const roleForm = document.getElementById('roleAssignmentForm');
   const roleFormToggle = document.getElementById('addRoleAssignmentBtn');
+  if (adminUser.role !== 'Administrator') roleFormToggle?.classList.add('hidden');
   roleFormToggle?.addEventListener('click', () => roleForm.classList.toggle('hidden'));
   document.getElementById('cancelRoleAssignmentBtn')?.addEventListener('click', () => roleForm.classList.add('hidden'));
-  roleForm?.addEventListener('submit', (event) => {
+  roleForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const userId = document.getElementById('roleUserId').value.trim();
     const role = document.getElementById('roleSelection').value;
-    const profile = DEMO_DATA.employees.find((row) => row.userId === userId);
-    if (!profile) {
-      alert('No matching user ID found in the current directory.');
+    if (adminUser.role !== 'Administrator') {
+      setDashboardState('Only administrators can change roles.', true);
       return;
     }
-    profile.role = role;
-    renderEmployeeTable();
-    renderUserRoleAssignments();
-    alert(`${role} role assigned to ${userId}. Connect the role action to Supabase before production.`);
-    roleForm.reset();
-    roleForm.classList.add('hidden');
+    const employee = directoryEmployees.find((row) => row.user_id === userId);
+    if (!employee) {
+      setDashboardState('No matching user ID found in the current directory.', true);
+      return;
+    }
+    try {
+      const client = getSupabaseClient();
+      const { error: revokeError } = await client.from('user_roles')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('profile_id', employee.profile_id).is('revoked_at', null);
+      if (revokeError) throw revokeError;
+      const { error } = await client.from('user_roles').upsert({
+        profile_id: employee.profile_id,
+        role_name: role,
+        assigned_by: adminUser.id,
+        revoked_at: null,
+      }, { onConflict: 'profile_id,role_name' });
+      if (error) throw error;
+      await writeChangeLog(`Assigned ${role} role`, 'Role management', userId);
+      roleForm.reset();
+      roleForm.classList.add('hidden');
+      await loadDashboardData();
+    } catch (error) {
+      setDashboardState(`Role assignment failed: ${error.message}`, true);
+    }
   });
 
   const createRecordModal = document.getElementById('createRecordModal');
@@ -1268,38 +1470,100 @@ function setupDashboardInteractions() {
     const title = employee ? 'Add employee' : 'Add laptop';
     document.getElementById('createRecordTitle').textContent = title;
     createRecordForm.dataset.kind = kind;
+    const employeeRoleOptions = adminUser.role === 'Administrator'
+      ? '<option>Employee</option><option>IT Staff</option><option>Administrator</option>'
+      : '<option>Employee</option>';
     createRecordForm.innerHTML = employee
-      ? '<label><span>User ID</span><input name="userId" required placeholder="USR-1004"></label><label><span>Full name</span><input name="name" required></label><label><span>Email</span><input name="email" type="email" required></label><label><span>Department</span><input name="department" required></label><label><span>Role</span><select name="role"><option>Employee</option><option>IT Staff</option><option>Administrator</option></select></label><label><span>Status</span><select name="status"><option>Active</option><option>Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee</button></div>'
-      : '<label><span>Laptop ID</span><input name="id" required placeholder="ML-513"></label><label><span>Model</span><input name="model" required></label><label><span>Status</span><select name="status"><option>Available</option><option>Maintenance</option><option>Retired</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add laptop</button></div>';
+      ? `<p class="span-2">Employee ID is assigned automatically. The email must already belong to a registered account.</p><label><span>Email</span><input name="email" type="email" required></label><label><span>Department</span><input name="department"></label><label><span>Position</span><input name="position"></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee</button></div>`
+      : '<p class="span-2">Laptop ID is assigned automatically.</p><label><span>Model</span><input name="model" required></label><label><span>Status</span><select name="status"><option>Available</option><option>Maintenance</option><option>Retired</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add laptop</button></div>';
     createRecordModal.classList.remove('hidden');
   };
   document.getElementById('addEmployeeBtn')?.addEventListener('click', () => openCreateForm('employee'));
   document.getElementById('addLaptopBtn')?.addEventListener('click', () => openCreateForm('laptop'));
-  createRecordForm?.addEventListener('submit', (event) => {
+  createRecordForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = Object.fromEntries(new FormData(createRecordForm));
-    if (createRecordForm.dataset.kind === 'employee') {
-      if (DEMO_DATA.employees.some((row) => row.userId === formData.userId || row.email === formData.email)) {
-        alert('That user ID or email is already in use.');
-        return;
+    const submit = createRecordForm.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const client = getSupabaseClient();
+      if (createRecordForm.dataset.kind === 'employee') {
+        const { data: profiles, error: profileError } = await client.from('profiles')
+          .select('id,email').eq('email', String(formData.email).trim()).limit(1);
+        if (profileError) throw profileError;
+        if (!profiles.length) throw new Error('No registered account uses that email. Create its account first.');
+        const { data: employee, error } = await client.from('employees').insert({
+          profile_id: profiles[0].id,
+          department: formData.department || null,
+          position: formData.position || null,
+          active: formData.active === 'true',
+        }).select('user_id').single();
+        if (error) throw error;
+        const { error: roleError } = await client.from('user_roles').upsert({
+          profile_id: profiles[0].id,
+          role_name: formData.role,
+          assigned_by: adminUser.id,
+          revoked_at: null,
+        }, { onConflict: 'profile_id,role_name' });
+        if (roleError) throw roleError;
+        await writeChangeLog('Created employee record', 'Employees', employee.user_id);
+      } else {
+        const { data: laptop, error } = await client.from('laptops').insert({
+          model: formData.model.trim(),
+          status: formData.status,
+        }).select('laptop_id').single();
+        if (error) throw error;
+        await writeChangeLog('Created laptop', 'Laptops', laptop.laptop_id);
       }
-      DEMO_DATA.employees.push({ ...formData, laptop: 'Unassigned', position: '', status: formData.status });
-      DEMO_DATA.employees[DEMO_DATA.employees.length - 1].laptop = '';
-      renderEmployeeTable();
-      renderUserRoleAssignments();
-      renderAssignmentOptions();
-    } else {
-      if (DEMO_DATA.laptops.some((row) => row.id === formData.id)) {
-        alert('That laptop ID is already registered.');
-        return;
-      }
-      DEMO_DATA.laptops.push({ ...formData, assignment: 'Unassigned', sync: 'Never' });
-      renderLaptopTable();
-      renderAssignmentOptions();
+      createRecordModal.classList.add('hidden');
+      createRecordForm.reset();
+      await loadDashboardData();
+    } catch (error) {
+      setDashboardState(`Record could not be created: ${error.message}`, true);
+    } finally {
+      submit.disabled = false;
     }
-    createRecordModal.classList.add('hidden');
-    createRecordForm.reset();
   });
+
+  document.getElementById('requestTable')?.addEventListener('click', (event) => {
+    const button = event.target.closest('.review-change-request');
+    if (!button) return;
+    selectedChangeRequest = changeRequests.find((request) => request.id === button.dataset.requestId);
+    if (!selectedChangeRequest) return;
+    document.getElementById('requestReviewDetails').innerHTML = `
+      <dl class="details-grid">
+        <div><dt>Employee</dt><dd>${escapeHtml(selectedChangeRequest.employeeName)}</dd></div>
+        <div><dt>Request</dt><dd>${escapeHtml(selectedChangeRequest.request_type)}</dd></div>
+        <div><dt>Status</dt><dd>${escapeHtml(selectedChangeRequest.status)}</dd></div>
+        <div><dt>Reason</dt><dd>${escapeHtml(selectedChangeRequest.reason)}</dd></div>
+      </dl>`;
+    document.getElementById('requestReviewRemarks').value = selectedChangeRequest.administrator_remarks || '';
+    document.getElementById('requestReviewState').classList.add('hidden');
+    document.getElementById('approveRequestBtn').disabled = selectedChangeRequest.status !== 'Pending';
+    document.getElementById('rejectRequestBtn').disabled = selectedChangeRequest.status !== 'Pending';
+    document.getElementById('requestReviewModal').classList.remove('hidden');
+  });
+  const reviewRequest = async (status) => {
+    if (!selectedChangeRequest) return;
+    const state = document.getElementById('requestReviewState');
+    try {
+      const { error } = await getSupabaseClient().from('laptop_change_requests')
+        .update({
+          status,
+          administrator_remarks: document.getElementById('requestReviewRemarks').value.trim() || null,
+        }).eq('id', selectedChangeRequest.id);
+      if (error) throw error;
+      await writeChangeLog(`${status} change request`, 'Change requests', selectedChangeRequest.id);
+      document.getElementById('requestReviewModal').classList.add('hidden');
+      await loadDashboardData();
+    } catch (error) {
+      state.textContent = `Request review failed: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    }
+  };
+  document.getElementById('approveRequestBtn')?.addEventListener('click', () => reviewRequest('Approved'));
+  document.getElementById('rejectRequestBtn')?.addEventListener('click', () => reviewRequest('Rejected'));
 }
 
 async function initDashboard() {
@@ -1309,33 +1573,12 @@ async function initDashboard() {
   const state = readState();
   applyTheme(state.theme, state.accent);
 
-  renderMetricCards();
-  renderActivityList();
-  renderNotifications();
   renderBarChart();
   renderTicketLegend();
   renderAnalytics();
-  renderBlockingTable();
-  renderAssignmentTable();
-  renderAssignmentOptions();
-  renderRequestTable();
-  renderEmployeeTable();
-  renderLaptopTable();
   setupDashboardInteractions();
   setupTicketListRealtime();
-  loadTickets();
-  loadAnalyticsData();
-  if (sessionStorage.getItem('mindlock-show-update-logs-after-login') === 'true') {
-    sessionStorage.removeItem('mindlock-show-update-logs-after-login');
-    document.getElementById('updateLogsModal').classList.remove('hidden');
-  }
-
-  if (sessionStorage.getItem('mindlock-notifications-hidden') === 'true') {
-    const notificationList = document.getElementById('notificationList');
-    if (notificationList) {
-      notificationList.innerHTML = '<li><strong>Notifications hidden for this session.</strong></li>';
-    }
-  }
+  await Promise.all([loadDashboardData(), loadTickets(), loadAnalyticsData()]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
