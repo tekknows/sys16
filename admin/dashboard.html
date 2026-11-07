@@ -35,9 +35,7 @@
         </nav>
 
         <div class="sidebar-meta">
-          <button class="nav-link version-link" id="versionButton" aria-label="System version 1.0.0; open update logs">
-            <span>System version</span><span class="version-tag">v1.0.0</span>
-          </button>
+          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.1.0">v1.1.0</button>
           <button class="secondary-btn small-btn" id="logoutBtn">Logout</button>
         </div>
       </aside>
@@ -520,12 +518,37 @@
     </div>
 
     <div class="modal-backdrop hidden" id="updateLogsModal" role="dialog" aria-modal="true" aria-labelledby="updateLogsTitle">
-      <section class="modal-card">
+      <section class="modal-card update-logs-modal-card">
         <div class="card-header"><div><p class="eyebrow">Current release</p><h2 id="updateLogsTitle">Update logs</h2></div><button class="icon-btn" data-close-modal aria-label="Close update logs">×</button></div>
-        <div class="version-banner"><span>Version</span><strong>1.0.0</strong><time datetime="2026-11-06">November 6, 2026</time></div>
-        <h3>Initial MINDLOCK release</h3>
-        <p>Admin dashboard and employee extension foundation.</p>
-        <ul><li>Employee, laptop, ticket, and schedule modules</li><li>Incognito policy control and analytics overview</li><li>Navigation, theme, and account settings improvements</li></ul>
+        <div class="update-logs-content">
+          <div class="version-banner"><span>Version</span><strong>1.1.0</strong><time datetime="2026-11-08">November 8, 2026</time></div>
+          <h3>Employee and device monitoring update</h3>
+          <p>Improves laptop assignment and adds secure device registration and connection monitoring.</p>
+          <ul>
+            <li>Assign and reassign laptops to employees while retaining assignment history</li>
+            <li>Register and revoke devices with unique device IDs and authorized MAC address records</li>
+            <li>Show laptop registration, online/offline status, and last heartbeat in employee and laptop views</li>
+            <li>View and filter device connection history by employee, laptop, and date</li>
+            <li>Add a Windows monitoring agent that securely sends device heartbeats</li>
+            <li>Support employee-specific or all-employee website blocking schedules</li>
+            <li>Add login light and dark mode and simplify laptop registration fields</li>
+          </ul>
+          <hr />
+          <div class="version-banner"><span>Version</span><strong>1.0.0</strong><time datetime="2026-11-06">November 6, 2026</time></div>
+          <h3>Initial MINDLOCK release</h3>
+          <p>Admin dashboard and employee extension foundation.</p>
+          <ul>
+            <li>Employee, laptop, ticket, and website schedule modules</li>
+            <li>Incognito policy control and analytics overview</li>
+            <li>Navigation, theme, and account settings</li>
+          </ul>
+        </div>
+        <footer class="update-logs-footer">
+          <label class="checkbox-row update-logs-dismissal">
+            <input type="checkbox" id="dontShowUpdateLogsAgain" />
+            <span>Don't show again this session</span>
+          </label>
+        </footer>
       </section>
     </div>
 

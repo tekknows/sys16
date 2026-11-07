@@ -1,4 +1,5 @@
 const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
+const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.1.0';
 
 const TICKET_PAGE_SIZE = 10;
 const TICKET_STATUSES = ['Open', 'In Progress', 'Waiting for Employee', 'Waiting for IT', 'Resolved', 'Closed'];
@@ -1376,11 +1377,22 @@ function setupDashboardInteractions() {
   }
 
   document.querySelectorAll('[data-close-modal]').forEach((button) => {
-    button.addEventListener('click', () => button.closest('.modal-backdrop')?.classList.add('hidden'));
+    button.addEventListener('click', () => {
+      const backdrop = button.closest('.modal-backdrop');
+      if (backdrop?.id === 'updateLogsModal') {
+        closeUpdateLogsModal();
+      } else {
+        backdrop?.classList.add('hidden');
+      }
+    });
   });
   document.querySelectorAll('.modal-backdrop').forEach((backdrop) => {
     backdrop.addEventListener('click', (event) => {
       if (event.target === backdrop) {
+        if (backdrop.id === 'updateLogsModal') {
+          closeUpdateLogsModal();
+          return;
+        }
         backdrop.classList.add('hidden');
         if (backdrop.id === 'deviceRegistrationModal') {
           document.getElementById('deviceCredentialValue').value = '';
@@ -1540,7 +1552,9 @@ function setupDashboardInteractions() {
   ['connectionEmployeeFilter', 'connectionLaptopFilter', 'connectionDateFrom', 'connectionDateTo'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', renderConnectionHistory);
   });
-  document.getElementById('versionButton')?.addEventListener('click', () => document.getElementById('updateLogsModal')?.classList.remove('hidden'));
+  document.getElementById('versionButton')?.addEventListener('click', () => {
+    document.getElementById('updateLogsModal')?.classList.remove('hidden');
+  });
   document.getElementById('showLogsBtn')?.addEventListener('click', async () => {
     const modal = document.getElementById('activityLogsModal');
     const table = document.getElementById('activityLogsTable');
@@ -2147,6 +2161,13 @@ function setupDashboardInteractions() {
   document.getElementById('rejectRequestBtn')?.addEventListener('click', () => reviewRequest('Rejected'));
 }
 
+function closeUpdateLogsModal() {
+  if (document.getElementById('dontShowUpdateLogsAgain')?.checked) {
+    sessionStorage.setItem(UPDATE_LOGS_DISMISSAL_KEY, 'true');
+  }
+  document.getElementById('updateLogsModal')?.classList.add('hidden');
+}
+
 async function initDashboard() {
   const authorized = await ensureAdminSession();
   if (!authorized) return;
@@ -2158,6 +2179,9 @@ async function initDashboard() {
   renderTicketLegend();
   renderAnalytics();
   setupDashboardInteractions();
+  if (!sessionStorage.getItem(UPDATE_LOGS_DISMISSAL_KEY)) {
+    document.getElementById('updateLogsModal')?.classList.remove('hidden');
+  }
   setupTicketListRealtime();
   await Promise.all([loadDashboardData(), loadTickets(), loadAnalyticsData()]);
   if (monitoringRefreshTimer) window.clearInterval(monitoringRefreshTimer);
