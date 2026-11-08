@@ -2064,8 +2064,19 @@ function setupDashboardInteractions() {
       ? '<option>Employee</option><option>IT Staff</option><option>Administrator</option>'
       : '<option>Employee</option>';
     createRecordForm.innerHTML = employee
-      ? `<p class="span-2">Employee ID is generated automatically. The temporary password is sent securely to Supabase Auth and is not stored in the employee table.</p><label><span>Full name</span><input name="name" required></label><label><span>Company email</span><input name="email" type="email" required></label><label><span>Temporary password</span><input name="password" type="password" minlength="8" required></label><label><span>Department</span><input name="department" required></label><label><span>Job title</span><input name="position" required></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Account status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee account</button></div>`
+      ? `<p class="span-2">Employee ID is generated automatically. The temporary password is sent securely to Supabase Auth and is not stored in the employee table.</p><label><span>Full name</span><input name="name" required></label><label><span>Company email</span><input name="email" type="email" required></label><label><span>Temporary password</span><div class="input-action-row"><input name="password" type="text" minlength="8" autocomplete="new-password" required><button class="secondary-btn" type="button" data-generate-password>Generate password</button></div></label><label><span>Department</span><input name="department" required></label><label><span>Job title</span><input name="position" required></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Account status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee account</button></div>`
       : '<p class="span-2">Laptop ID is assigned automatically. Enter the MAC address from the authorized IT registration process; a browser cannot read physical MAC addresses.</p><label><span>Device name</span><input name="device_name" placeholder="Optional hostname"></label><label><span>Manufacturer</span><input name="manufacturer" placeholder="Dell, HP, Lenovo..."></label><label><span>Model</span><input name="model" required></label><label><span>Serial number (optional)</span><input name="serial_number" placeholder="Optional"></label><label><span>MAC address (optional)</span><input name="mac_address" placeholder="00:1A:2B:3C:4D:5E" pattern="^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"></label><label><span>Status</span><select name="status"><option>Available</option><option>Maintenance</option><option>Retired</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add laptop</button></div>';
+    if (employee) {
+      const passwordInput = createRecordForm.querySelector('input[name="password"]');
+      createRecordForm.querySelector('[data-generate-password]')?.addEventListener('click', () => {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
+        const values = new Uint32Array(16);
+        crypto.getRandomValues(values);
+        passwordInput.value = Array.from(values, (value) => alphabet[value % alphabet.length]).join('');
+        passwordInput.focus();
+        passwordInput.select();
+      });
+    }
     createRecordModal.classList.remove('hidden');
   };
   document.getElementById('addEmployeeBtn')?.addEventListener('click', () => openCreateForm('employee'));

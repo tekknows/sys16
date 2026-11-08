@@ -903,6 +903,21 @@ textarea,
   gap: 12px;
 }
 
+.input-action-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.input-action-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.input-action-row button {
+  white-space: nowrap;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
