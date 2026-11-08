@@ -66,7 +66,15 @@ async function invokeSupabaseFunction(functionName, payload) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not reach the ${functionName} service. Deploy the Edge Function and verify the Supabase URL, then try again. ${message}`);
   }
-  const result = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let result = {};
+  if (responseText.trim()) {
+    try {
+      result = JSON.parse(responseText);
+    } catch (error) {
+      throw new Error(`The ${functionName} service returned an invalid response (${response.status}).`);
+    }
+  }
   if (response.status === 404) {
     throw new Error(`The ${functionName} Edge Function was not found. Deploy it with "supabase functions deploy ${functionName}" and verify the configured Supabase project.`);
   }
