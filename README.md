@@ -16,6 +16,7 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - `supabase/migrations/007_device_registration_monitoring.sql` — secure device registration, assignment history, and heartbeat connection logs
 - `supabase/functions/device-registration/` — admin-only device registration and revocation endpoint
 - `supabase/functions/device-heartbeat/` — credential-verified laptop heartbeat endpoint
+- `supabase/functions/employee-account/` — administrator-only employee Auth account and profile creation endpoint
 
 ## Quick start
 
@@ -37,7 +38,8 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - Run `supabase/migrations/007_device_registration_monitoring.sql` after migration 006.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js`, the extension, or the Windows agent.
 - Deploy from the project root with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt`. The registration endpoint checks the admin JWT itself; the heartbeat endpoint authenticates the device credential.
-- Set up employee, IT staff, and administrator accounts with Supabase Auth and matching rows in `profiles`, `employees`, and `user_roles`. Do not insert users directly into Supabase's `auth` tables.
+- Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.
+- Create employee accounts from the admin dashboard after deploying `employee-account`; it creates the Supabase Auth user and matching `profiles`, `employees`, and `user_roles` rows automatically. Create the first administrator account through Supabase Auth, then create its profile and administrator role during initial setup. Do not insert users directly into Supabase's `auth` tables.
 - Deactivate users with ticket history instead of deleting their profiles; the conversation migration restricts deletion so ticket records and sender history are retained.
 - Add the project URL and public anon key to both `admin/config.js` and `extension/config.js`. Never put a Supabase service-role key in the dashboard or extension.
 - Enable the extension for incognito use in the browser's extension settings if the organization's policy requires blocking there; browsers do not allow an extension to silently enable itself in incognito.

@@ -316,15 +316,16 @@ textarea,
   flex: 0 0 auto;
   position: relative;
   z-index: 2;
-  color: #fff;
-  background: #2563eb;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
 }
 
 .sidebar-toggle:hover,
 .sidebar-toggle:focus-visible {
-  background: #1d4ed8;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .sidebar-toggle svg {

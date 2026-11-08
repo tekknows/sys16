@@ -92,9 +92,13 @@ function saveState(nextState) {
   localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(nextState));
 }
 
-function applyTheme(themeName, accentColor) {
+function applyTheme(themeName, accentColor, applyAccent = false) {
   const root = document.documentElement;
-  root.style.setProperty('--accent', accentColor || '#2563eb');
+  if (applyAccent) {
+    root.style.setProperty('--accent', accentColor || '#2563eb');
+  } else {
+    root.style.removeProperty('--accent');
+  }
   document.body.classList.toggle('dark-mode', themeName === 'dark');
   document.body.classList.toggle('light-mode', themeName !== 'dark');
   [document.getElementById('themeToggleBtn'), document.getElementById('loginThemeToggleBtn')].forEach((btn) => {
@@ -155,11 +159,11 @@ function setupLoginPage() {
   const togglePassword = document.getElementById('togglePassword');
   const rememberedEmail = localStorage.getItem('mindlock-remember-admin');
   const themeState = readState();
-  applyTheme(themeState.theme, themeState.accent);
+  applyTheme(themeState.theme, null);
   document.getElementById('loginThemeToggleBtn')?.addEventListener('click', () => {
     const nextState = readState();
     nextState.theme = nextState.theme === 'dark' ? 'light' : 'dark';
-    applyTheme(nextState.theme, nextState.accent);
+    applyTheme(nextState.theme, null);
     saveState(nextState);
   });
 
@@ -1360,7 +1364,7 @@ function setupDashboardInteractions() {
     themeToggleBtn.addEventListener('click', () => {
       const state = readState();
       state.theme = state.theme === 'dark' ? 'light' : 'dark';
-      applyTheme(state.theme, state.accent);
+      applyTheme(state.theme, state.accent, true);
       saveState(state);
     });
   }
@@ -1719,7 +1723,7 @@ function setupDashboardInteractions() {
       const nextState = readState();
       nextState.accent = event.target.value;
       accentPreview.style.background = event.target.value;
-      applyTheme(nextState.theme, nextState.accent);
+      applyTheme(nextState.theme, nextState.accent, true);
       saveState(nextState);
     });
   }
@@ -2051,7 +2055,7 @@ function setupDashboardInteractions() {
       ? '<option>Employee</option><option>IT Staff</option><option>Administrator</option>'
       : '<option>Employee</option>';
     createRecordForm.innerHTML = employee
-      ? `<p class="span-2">Employee ID is generated automatically. The email must belong to a registered Supabase account.</p><label><span>Full name</span><input name="name" required></label><label><span>Company email</span><input name="email" type="email" required></label><label><span>Department</span><input name="department" required></label><label><span>Job title</span><input name="position" required></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Account status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee</button></div>`
+      ? `<p class="span-2">Employee ID is generated automatically. The temporary password is sent securely to Supabase Auth and is not stored in the employee table.</p><label><span>Full name</span><input name="name" required></label><label><span>Company email</span><input name="email" type="email" required></label><label><span>Temporary password</span><input name="password" type="password" minlength="8" required></label><label><span>Department</span><input name="department" required></label><label><span>Job title</span><input name="position" required></label><label><span>Role</span><select name="role">${employeeRoleOptions}</select></label><label><span>Account status</span><select name="active"><option value="true">Active</option><option value="false">Suspended</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add employee account</button></div>`
       : '<p class="span-2">Laptop ID is assigned automatically. Enter the MAC address from the authorized IT registration process; a browser cannot read physical MAC addresses.</p><label><span>Device name</span><input name="device_name" placeholder="Optional hostname"></label><label><span>Manufacturer</span><input name="manufacturer" placeholder="Dell, HP, Lenovo..."></label><label><span>Model</span><input name="model" required></label><label><span>Serial number (optional)</span><input name="serial_number" placeholder="Optional"></label><label><span>MAC address (optional)</span><input name="mac_address" placeholder="00:1A:2B:3C:4D:5E" pattern="^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"></label><label><span>Status</span><select name="status"><option>Available</option><option>Maintenance</option><option>Retired</option></select></label><div class="span-2 actions-row"><button class="primary-btn" type="submit">Add laptop</button></div>';
     createRecordModal.classList.remove('hidden');
   };
@@ -2065,31 +2069,16 @@ function setupDashboardInteractions() {
     try {
       const client = getSupabaseClient();
       if (createRecordForm.dataset.kind === 'employee') {
-        const { data: profiles, error: profileError } = await client.from('profiles')
-          .select('id,email').eq('email', String(formData.email).trim()).limit(1);
-        if (profileError) throw profileError;
-        if (!profiles.length) throw new Error('No registered account uses that email. Create its account first.');
-        const { error: updateProfileError } = await client.from('profiles').update({
+        const result = await invokeSupabaseFunction('employee-account', {
           full_name: String(formData.name).trim(),
-          department: formData.department || null,
-          position: formData.position || null,
-        }).eq('id', profiles[0].id);
-        if (updateProfileError) throw updateProfileError;
-        const { data: employee, error } = await client.from('employees').insert({
-          profile_id: profiles[0].id,
-          department: formData.department || null,
-          position: formData.position || null,
+          email: String(formData.email).trim(),
+          password: String(formData.password),
+          department: String(formData.department || '').trim(),
+          position: String(formData.position || '').trim(),
+          role: formData.role,
           active: formData.active === 'true',
-        }).select('user_id').single();
-        if (error) throw error;
-        const { error: roleError } = await client.from('user_roles').upsert({
-          profile_id: profiles[0].id,
-          role_name: formData.role,
-          assigned_by: adminUser.id,
-          revoked_at: null,
-        }, { onConflict: 'profile_id,role_name' });
-        if (roleError) throw roleError;
-        await writeChangeLog('Created employee record', 'Employees', employee.user_id);
+        });
+        await writeChangeLog('Created employee account', 'Employees', result.user_id);
       } else {
         const { data: laptop, error } = await client.from('laptops').insert({
           device_name: String(formData.device_name || '').trim() || null,
@@ -2173,7 +2162,7 @@ async function initDashboard() {
   if (!authorized) return;
 
   const state = readState();
-  applyTheme(state.theme, state.accent);
+  applyTheme(state.theme, state.accent, true);
 
   renderBarChart();
   renderTicketLegend();
