@@ -918,6 +918,24 @@ textarea,
   white-space: nowrap;
 }
 
+.input-action-row .icon-action-btn,
+.input-action-row .password-toggle {
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.input-action-row svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
