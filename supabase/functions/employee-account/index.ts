@@ -56,11 +56,20 @@ async function restRequest(
       ...(options.headers || {}),
     },
   });
+  const responseText = await response.text();
+  let body: unknown = null;
+  if (responseText.trim()) {
+    try {
+      body = JSON.parse(responseText);
+    } catch {
+      body = responseText;
+    }
+  }
   if (!response.ok) {
-    const message = await response.text();
+    const message = typeof body === 'string' ? body : JSON.stringify(body);
     throw new Error(message || `Database request failed (${response.status}).`);
   }
-  return response.status === 204 ? null : response.json();
+  return body;
 }
 
 async function deleteAuthUser(config: ReturnType<typeof getConfig>, userId: string) {
