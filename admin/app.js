@@ -51,16 +51,25 @@ async function invokeSupabaseFunction(functionName, payload) {
   if (sessionError) throw sessionError;
   if (!sessionData.session?.access_token) throw new Error('Your admin session has expired. Sign in again.');
   const config = window.MINDLOCK_CONFIG;
-  const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/${functionName}`, {
-    method: 'POST',
+  let response;
+  try {
+    response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/${functionName}`, {
+      method: 'POST',
     headers: {
-      apikey: config.supabaseAnonKey,
+        apikey: config.supabaseAnonKey,
       Authorization: `Bearer ${sessionData.session.access_token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-  const result = await response.json();
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not reach the ${functionName} service. Deploy the Edge Function and verify the Supabase URL, then try again. ${message}`);
+  }
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 404) {
+    throw new Error(`The ${functionName} Edge Function was not found. Deploy it with "supabase functions deploy ${functionName}" and verify the configured Supabase project.`);
+  }
   if (!response.ok) throw new Error(result.error || `Device service failed (${response.status}).`);
   return result;
 }
