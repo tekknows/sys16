@@ -22,11 +22,13 @@
         <label><span>Email</span><input id="extensionEmail" type="email" autocomplete="username" required /></label>
         <label><span>Password</span><input id="extensionPassword" type="password" autocomplete="current-password" required /></label>
         <button type="submit" class="primary-btn">Sign in</button>
+        <button id="employeePreviewBtn" type="button" class="secondary-btn">Preview employee console</button>
         <p id="extensionLoginState" class="inline-state" role="status"></p>
       </form>
     </section>
 
     <div id="extensionApp" class="hidden">
+      <p id="employeePreviewNotice" class="preview-notice hidden" role="status">Preview mode — example content only. Sign in to view your account or submit tickets.</p>
       <nav class="extension-nav" aria-label="Extension sections">
         <button class="extension-tab active" data-view="homeView">Home</button>
         <button class="extension-tab" data-view="myTicketsView">My tickets</button>

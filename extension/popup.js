@@ -7,6 +7,7 @@ let activeTicket = null;
 let ticketRefreshTimer = null;
 let ticketRealtimeTimer = null;
 let employeeTheme = 'light';
+let employeePreviewMode = false;
 
 function isSupabaseConfigured() {
   return Boolean(globalThis.MINDLOCK_CONFIG?.supabaseUrl && globalThis.MINDLOCK_CONFIG?.supabaseAnonKey);
@@ -117,8 +118,11 @@ async function signOut(updateUi = true) {
 }
 
 function showLogin(message = '') {
+  employeePreviewMode = false;
+  setEmployeeFormsDisabled(false);
   document.getElementById('extensionLoginView').classList.remove('hidden');
   document.getElementById('extensionApp').classList.add('hidden');
+  document.getElementById('employeePreviewNotice').classList.add('hidden');
   document.getElementById('extensionLoginState').textContent = message;
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
   if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
@@ -188,6 +192,16 @@ function escapeHtml(value) {
     '"': '&quot;',
     "'": '&#39;',
   }[character]));
+}
+
+function setEmployeeFormsDisabled(disabled) {
+  ['issueForm', 'employeeReplyForm'].forEach((formId) => {
+    document.getElementById(formId).querySelectorAll('input, select, textarea, button').forEach((field) => {
+      field.disabled = disabled;
+    });
+  });
+  document.getElementById('reopenTicketBtn').disabled = disabled;
+  document.getElementById('reloadMyTicketsBtn').disabled = disabled;
 }
 
 async function openEmployeeTicket(ticketId) {
@@ -362,6 +376,7 @@ async function sendEmployeeReply(event) {
 
 async function submitEmployeeTicket(event) {
   event.preventDefault();
+  if (employeePreviewMode) return;
   const status = document.getElementById('issueSubmitState');
   const form = event.currentTarget;
   const submitButton = form.querySelector('button[type="submit"]');
@@ -407,6 +422,8 @@ async function submitEmployeeTicket(event) {
 
 async function signInEmployee(event) {
   event.preventDefault();
+  employeePreviewMode = false;
+  setEmployeeFormsDisabled(false);
   const state = document.getElementById('extensionLoginState');
   if (!isSupabaseConfigured()) {
     state.textContent = 'Supabase is not configured. Add the project URL and anon key to extension/config.js.';
@@ -437,8 +454,11 @@ async function signInEmployee(event) {
 }
 
 async function showEmployeeApp() {
+  employeePreviewMode = false;
+  setEmployeeFormsDisabled(false);
   document.getElementById('extensionLoginView').classList.add('hidden');
   document.getElementById('extensionApp').classList.remove('hidden');
+  document.getElementById('employeePreviewNotice').classList.add('hidden');
   await switchExtensionView('homeView');
   await loadMyTickets();
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
@@ -448,7 +468,54 @@ async function showEmployeeApp() {
 async function switchExtensionView(viewId) {
   document.querySelectorAll('.extension-view').forEach((view) => view.classList.toggle('active', view.id === viewId));
   document.querySelectorAll('.extension-tab[data-view]').forEach((tab) => tab.classList.toggle('active', tab.dataset.view === viewId));
+  if (employeePreviewMode) return;
   if (viewId === 'myTicketsView') await loadMyTickets();
+}
+
+function showEmployeePreview() {
+  employeePreviewMode = true;
+  document.getElementById('extensionLoginView').classList.add('hidden');
+  document.getElementById('extensionApp').classList.remove('hidden');
+  document.getElementById('employeePreviewNotice').classList.remove('hidden');
+  document.getElementById('userName').textContent = 'Sam Patel';
+  document.getElementById('employeeMeta').textContent = 'EMP-1042 · LAP-018';
+  document.getElementById('websiteStatus').textContent = '1 active policy';
+  document.getElementById('incognitoStatus').textContent = 'Managed by IT';
+  document.getElementById('blockingPolicyState').textContent = 'Example policy currently applied to your company laptop.';
+  document.getElementById('blockedList').innerHTML = '<li>social.example · Weekdays, 09:00–17:30</li>';
+  document.getElementById('todayUsage').textContent = '2h 14m';
+  document.getElementById('mostVisitedSite').textContent = 'docs.company.example';
+  document.getElementById('myTicketsList').innerHTML = `
+    <li><button type="button" class="ticket-list-button" data-ticket-id="preview-ticket">
+      <span class="ticket-list-top"><strong>ML-2025</strong><span class="status-pill">In Progress</span></span>
+      <span>Work training site is blocked</span>
+      <small>Website Blocking Issue · ${escapeHtml(formatDate(new Date().toISOString()))}</small>
+    </button></li>`;
+  document.getElementById('myTicketsState').classList.add('hidden');
+  document.getElementById('employeeTicketDetail').classList.add('hidden');
+  document.getElementById('issueSubmitState').textContent = 'Preview only — sign in to submit a real ticket.';
+  setEmployeeFormsDisabled(true);
+  switchExtensionView('homeView');
+}
+
+function openPreviewTicket() {
+  document.getElementById('employeeTicketDetail').classList.remove('hidden');
+  document.getElementById('employeeTicketInfo').innerHTML = `
+    <h3>ML-2025 · Work training site is blocked</h3>
+    <p>I need access to the required safety course. Could IT review the website policy?</p>
+    <p class="ticket-detail-meta">Website Blocking Issue · In Progress · Normal</p>`;
+  document.getElementById('employeeConversation').innerHTML = `
+    <article class="message-bubble employee-message">
+      <div class="message-meta"><strong>Sam Patel · Employee</strong><time>Today</time></div>
+      <p>I need access to the required safety course. Could IT review the website policy?</p>
+      <small class="message-read">Read by IT</small>
+    </article>
+    <article class="message-bubble staff-message">
+      <div class="message-meta"><strong>IT Support</strong><time>Today</time></div>
+      <p>Thanks, we’re reviewing the policy and will follow up here.</p>
+      <small class="message-read">Read</small>
+    </article>`;
+  switchExtensionView('myTicketsView');
 }
 
 async function initPopup() {
@@ -456,6 +523,7 @@ async function initPopup() {
   setExtensionTheme(theme['mindlock-extension-theme'] || 'light');
   document.getElementById('themeToggle').addEventListener('click', () => setExtensionTheme(employeeTheme === 'dark' ? 'light' : 'dark'));
   document.getElementById('extensionLoginForm').addEventListener('submit', signInEmployee);
+  document.getElementById('employeePreviewBtn').addEventListener('click', showEmployeePreview);
   document.getElementById('issueForm').addEventListener('submit', submitEmployeeTicket);
   document.getElementById('employeeReplyForm').addEventListener('submit', sendEmployeeReply);
   document.getElementById('reloadMyTicketsBtn').addEventListener('click', () => loadMyTickets());
@@ -465,7 +533,7 @@ async function initPopup() {
     if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
     ticketRealtimeTimer = null;
     document.getElementById('employeeTicketDetail').classList.add('hidden');
-    loadMyTickets();
+    if (!employeePreviewMode) loadMyTickets();
   });
   document.getElementById('reopenTicketBtn').addEventListener('click', async () => {
     try {
@@ -480,6 +548,10 @@ async function initPopup() {
   document.getElementById('myTicketsList').addEventListener('click', async (event) => {
     const button = event.target.closest('[data-ticket-id]');
     if (!button) return;
+    if (employeePreviewMode) {
+      openPreviewTicket();
+      return;
+    }
     const state = document.getElementById('myTicketsState');
     state.textContent = 'Loading ticket…';
     state.classList.remove('hidden', 'error-text');
