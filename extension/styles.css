@@ -377,14 +377,3 @@ input, select, textarea {
   border-radius: 10px;
   padding: 11px 16px;
 }
-
-.preview-notice {
-  margin: 14px 0 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-alt);
-  color: var(--text-soft);
-  font-size: 0.78rem;
-  line-height: 1.5;
-}

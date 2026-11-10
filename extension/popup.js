@@ -7,7 +7,6 @@ let activeTicket = null;
 let ticketRefreshTimer = null;
 let ticketRealtimeTimer = null;
 let employeeTheme = 'light';
-let employeePreviewMode = false;
 
 function isSupabaseConfigured() {
   return Boolean(globalThis.MINDLOCK_CONFIG?.supabaseUrl && globalThis.MINDLOCK_CONFIG?.supabaseAnonKey);
@@ -118,11 +117,8 @@ async function signOut(updateUi = true) {
 }
 
 function showLogin(message = '') {
-  employeePreviewMode = false;
-  setEmployeeFormsDisabled(false);
   document.getElementById('extensionLoginView').classList.remove('hidden');
   document.getElementById('extensionApp').classList.add('hidden');
-  document.getElementById('employeePreviewNotice').classList.add('hidden');
   document.getElementById('extensionLoginState').textContent = message;
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
   if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
@@ -148,7 +144,116 @@ async function loadCurrentEmployee() {
   const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop:laptops(id,laptop_id,device_registration_id,model)&limit=1`);
   assignedDevice = assignments[0]?.laptop || null;
   document.getElementById('userName').textContent = employeeProfile.full_name;
+  document.getElementById('userAvatar').textContent = employeeProfile.full_name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('') || '—';
   document.getElementById('employeeMeta').textContent = `${employeeRecord.user_id} · ${assignedDevice?.laptop_id || 'No assigned laptop'}`;
+  document.getElementById('assignedDeviceStatus').textContent = assignedDevice?.laptop_id || 'No assigned laptop';
+}
+
+function isRuleActiveNow(rule, now = new Date()) {
+  const day = now.toLocaleDateString('en-US', { weekday: 'short' });
+  if (!(rule.days_of_week || []).includes(day)) return false;
+  const time = now.toTimeString().slice(0, 5);
+  const start = String(rule.start_time || '00:00').slice(0, 5);
+  const end = String(rule.end_time || '23:59').slice(0, 5);
+  return start <= end ? time >= start && time <= end : time >= start || time <= end;
+}
+
+async function loadEmployeeBlockingPolicies() {
+  const state = document.getElementById('blockingPolicyState');
+  try {
+    let hasScheduleColumns = true;
+    let hasTargetColumn = true;
+    let rules;
+    while (true) {
+      const columns = [
+        'domain',
+        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
+        ...(hasTargetColumn ? ['target_profile_id'] : []),
+      ];
+      const query = `website_blocking_rules?is_active=eq.true&select=${columns.join(',')}`;
+      try {
+        rules = await restRequest(query);
+        break;
+      } catch (error) {
+        if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(error.message)) {
+          hasScheduleColumns = false;
+          continue;
+        }
+        if (hasTargetColumn && /target_profile_id/i.test(error.message)) {
+          hasTargetColumn = false;
+          continue;
+        }
+        throw error;
+      }
+    }
+    const applicableRules = rules
+      .filter((rule) => !rule.target_profile_id || rule.target_profile_id === extensionSession.user.id)
+      .map((rule) => ({
+        ...rule,
+        start_time: rule.start_time || '00:00',
+        end_time: rule.end_time || '23:59',
+        days_of_week: rule.days_of_week || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      }));
+    const activeRules = applicableRules.filter((rule) => isRuleActiveNow(rule));
+    document.getElementById('websiteStatus').textContent = String(activeRules.length);
+    document.getElementById('blockedList').innerHTML = activeRules.map((rule) => (
+      `<li>${escapeHtml(rule.domain)} · ${escapeHtml(String(rule.start_time).slice(0, 5))}–${escapeHtml(String(rule.end_time).slice(0, 5))}</li>`
+    )).join('');
+    state.textContent = activeRules.length
+      ? 'These website rules are active for your account right now.'
+      : 'No website blocking rules are active for your account right now.';
+    state.classList.remove('error-text');
+  } catch (error) {
+    document.getElementById('websiteStatus').textContent = 'Unavailable';
+    document.getElementById('blockedList').innerHTML = '';
+    state.textContent = `Could not load website policies: ${error.message}`;
+    state.classList.add('error-text');
+  }
+}
+
+function formatUsageDuration(totalSeconds) {
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+async function loadEmployeeUsageSummary() {
+  const state = document.getElementById('usageSummaryState');
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  try {
+    const logs = await restRequest(
+      `website_usage_logs?profile_id=eq.${encodeURIComponent(extensionSession.user.id)}&recorded_at=gte.${encodeURIComponent(start.toISOString())}&recorded_at=lt.${encodeURIComponent(end.toISOString())}&select=domain,visit_count,total_seconds,recorded_at&order=recorded_at.desc&limit=1000`,
+    );
+    const totalSeconds = logs.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0);
+    const visitsByDomain = new Map();
+    logs.forEach((row) => {
+      if (row.domain) visitsByDomain.set(row.domain, (visitsByDomain.get(row.domain) || 0) + (Number(row.visit_count) || 0));
+    });
+    const mostVisited = [...visitsByDomain.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    document.getElementById('todayUsage').textContent = logs.length ? formatUsageDuration(totalSeconds) : 'No data';
+    document.getElementById('mostVisitedSite').textContent = mostVisited || '—';
+    state.textContent = logs.length ? 'Based on today’s Supabase usage records.' : 'No website usage has been recorded for today.';
+    state.classList.remove('error-text');
+  } catch (error) {
+    document.getElementById('todayUsage').textContent = 'Unavailable';
+    document.getElementById('mostVisitedSite').textContent = '—';
+    state.textContent = `Could not load usage summary: ${error.message}`;
+    state.classList.add('error-text');
+  }
+}
+
+async function loadEmployeeHomeData() {
+  await Promise.all([loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary()]);
 }
 
 async function loadMyTickets() {
@@ -192,16 +297,6 @@ function escapeHtml(value) {
     '"': '&quot;',
     "'": '&#39;',
   }[character]));
-}
-
-function setEmployeeFormsDisabled(disabled) {
-  ['issueForm', 'employeeReplyForm'].forEach((formId) => {
-    document.getElementById(formId).querySelectorAll('input, select, textarea, button').forEach((field) => {
-      field.disabled = disabled;
-    });
-  });
-  document.getElementById('reopenTicketBtn').disabled = disabled;
-  document.getElementById('reloadMyTicketsBtn').disabled = disabled;
 }
 
 async function openEmployeeTicket(ticketId) {
@@ -376,7 +471,6 @@ async function sendEmployeeReply(event) {
 
 async function submitEmployeeTicket(event) {
   event.preventDefault();
-  if (employeePreviewMode) return;
   const status = document.getElementById('issueSubmitState');
   const form = event.currentTarget;
   const submitButton = form.querySelector('button[type="submit"]');
@@ -422,8 +516,6 @@ async function submitEmployeeTicket(event) {
 
 async function signInEmployee(event) {
   event.preventDefault();
-  employeePreviewMode = false;
-  setEmployeeFormsDisabled(false);
   const state = document.getElementById('extensionLoginState');
   if (!isSupabaseConfigured()) {
     state.textContent = 'Supabase is not configured. Add the project URL and anon key to extension/config.js.';
@@ -454,68 +546,22 @@ async function signInEmployee(event) {
 }
 
 async function showEmployeeApp() {
-  employeePreviewMode = false;
-  setEmployeeFormsDisabled(false);
   document.getElementById('extensionLoginView').classList.add('hidden');
   document.getElementById('extensionApp').classList.remove('hidden');
-  document.getElementById('employeePreviewNotice').classList.add('hidden');
   await switchExtensionView('homeView');
+  await loadEmployeeHomeData();
   await loadMyTickets();
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
-  ticketRefreshTimer = setInterval(loadMyTickets, 30000);
+  ticketRefreshTimer = setInterval(() => {
+    loadEmployeeHomeData();
+    loadMyTickets();
+  }, 30000);
 }
 
 async function switchExtensionView(viewId) {
   document.querySelectorAll('.extension-view').forEach((view) => view.classList.toggle('active', view.id === viewId));
   document.querySelectorAll('.extension-tab[data-view]').forEach((tab) => tab.classList.toggle('active', tab.dataset.view === viewId));
-  if (employeePreviewMode) return;
   if (viewId === 'myTicketsView') await loadMyTickets();
-}
-
-function showEmployeePreview() {
-  employeePreviewMode = true;
-  document.getElementById('extensionLoginView').classList.add('hidden');
-  document.getElementById('extensionApp').classList.remove('hidden');
-  document.getElementById('employeePreviewNotice').classList.remove('hidden');
-  document.getElementById('userName').textContent = 'Sam Patel';
-  document.getElementById('employeeMeta').textContent = 'EMP-1042 · LAP-018';
-  document.getElementById('websiteStatus').textContent = '1 active policy';
-  document.getElementById('incognitoStatus').textContent = 'Managed by IT';
-  document.getElementById('blockingPolicyState').textContent = 'Example policy currently applied to your company laptop.';
-  document.getElementById('blockedList').innerHTML = '<li>social.example · Weekdays, 09:00–17:30</li>';
-  document.getElementById('todayUsage').textContent = '2h 14m';
-  document.getElementById('mostVisitedSite').textContent = 'docs.company.example';
-  document.getElementById('myTicketsList').innerHTML = `
-    <li><button type="button" class="ticket-list-button" data-ticket-id="preview-ticket">
-      <span class="ticket-list-top"><strong>ML-2025</strong><span class="status-pill">In Progress</span></span>
-      <span>Work training site is blocked</span>
-      <small>Website Blocking Issue · ${escapeHtml(formatDate(new Date().toISOString()))}</small>
-    </button></li>`;
-  document.getElementById('myTicketsState').classList.add('hidden');
-  document.getElementById('employeeTicketDetail').classList.add('hidden');
-  document.getElementById('issueSubmitState').textContent = 'Preview only — sign in to submit a real ticket.';
-  setEmployeeFormsDisabled(true);
-  switchExtensionView('homeView');
-}
-
-function openPreviewTicket() {
-  document.getElementById('employeeTicketDetail').classList.remove('hidden');
-  document.getElementById('employeeTicketInfo').innerHTML = `
-    <h3>ML-2025 · Work training site is blocked</h3>
-    <p>I need access to the required safety course. Could IT review the website policy?</p>
-    <p class="ticket-detail-meta">Website Blocking Issue · In Progress · Normal</p>`;
-  document.getElementById('employeeConversation').innerHTML = `
-    <article class="message-bubble employee-message">
-      <div class="message-meta"><strong>Sam Patel · Employee</strong><time>Today</time></div>
-      <p>I need access to the required safety course. Could IT review the website policy?</p>
-      <small class="message-read">Read by IT</small>
-    </article>
-    <article class="message-bubble staff-message">
-      <div class="message-meta"><strong>IT Support</strong><time>Today</time></div>
-      <p>Thanks, we’re reviewing the policy and will follow up here.</p>
-      <small class="message-read">Read</small>
-    </article>`;
-  switchExtensionView('myTicketsView');
 }
 
 async function initPopup() {
@@ -523,7 +569,6 @@ async function initPopup() {
   setExtensionTheme(theme['mindlock-extension-theme'] || 'light');
   document.getElementById('themeToggle').addEventListener('click', () => setExtensionTheme(employeeTheme === 'dark' ? 'light' : 'dark'));
   document.getElementById('extensionLoginForm').addEventListener('submit', signInEmployee);
-  document.getElementById('employeePreviewBtn').addEventListener('click', showEmployeePreview);
   document.getElementById('issueForm').addEventListener('submit', submitEmployeeTicket);
   document.getElementById('employeeReplyForm').addEventListener('submit', sendEmployeeReply);
   document.getElementById('reloadMyTicketsBtn').addEventListener('click', () => loadMyTickets());
@@ -533,7 +578,7 @@ async function initPopup() {
     if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
     ticketRealtimeTimer = null;
     document.getElementById('employeeTicketDetail').classList.add('hidden');
-    if (!employeePreviewMode) loadMyTickets();
+    loadMyTickets();
   });
   document.getElementById('reopenTicketBtn').addEventListener('click', async () => {
     try {
@@ -548,10 +593,6 @@ async function initPopup() {
   document.getElementById('myTicketsList').addEventListener('click', async (event) => {
     const button = event.target.closest('[data-ticket-id]');
     if (!button) return;
-    if (employeePreviewMode) {
-      openPreviewTicket();
-      return;
-    }
     const state = document.getElementById('myTicketsState');
     state.textContent = 'Loading ticket…';
     state.classList.remove('hidden', 'error-text');

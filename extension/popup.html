@@ -22,13 +22,11 @@
         <label><span>Email</span><input id="extensionEmail" type="email" autocomplete="username" required /></label>
         <label><span>Password</span><input id="extensionPassword" type="password" autocomplete="current-password" required /></label>
         <button type="submit" class="primary-btn">Sign in</button>
-        <button id="employeePreviewBtn" type="button" class="secondary-btn">Preview employee console</button>
         <p id="extensionLoginState" class="inline-state" role="status"></p>
       </form>
     </section>
 
     <div id="extensionApp" class="hidden">
-      <p id="employeePreviewNotice" class="preview-notice hidden" role="status">Preview mode — example content only. Sign in to view your account or submit tickets.</p>
       <nav class="extension-nav" aria-label="Extension sections">
         <button class="extension-tab active" data-view="homeView">Home</button>
         <button class="extension-tab" data-view="myTicketsView">My tickets</button>
@@ -39,7 +37,7 @@
     <section id="homeView" class="extension-view active">
     <section class="overview-card">
       <div class="user-row">
-        <div class="avatar">SP</div>
+        <div class="avatar" id="userAvatar" aria-hidden="true">—</div>
         <div>
           <strong id="userName">Employee</strong>
           <small id="employeeMeta">Company device</small>
@@ -47,19 +45,19 @@
       </div>
       <div class="summary-grid">
         <div>
-          <span>Website status</span>
-          <strong id="websiteStatus">Blocked policy active</strong>
+          <span>Active blocking rules</span>
+          <strong id="websiteStatus">Loading…</strong>
         </div>
         <div>
-          <span>Incognito policy</span>
-          <strong id="incognitoStatus">Enabled</strong>
+          <span>Assigned device</span>
+          <strong id="assignedDeviceStatus">Loading…</strong>
         </div>
       </div>
     </section>
 
     <section class="card-block">
       <h2>Current blocking policy</h2>
-      <p class="muted-copy" id="blockingPolicyState">Policy details will appear after the device sync is connected.</p>
+      <p class="muted-copy" id="blockingPolicyState" role="status">Loading policies…</p>
       <ul id="blockedList" class="list-items"></ul>
     </section>
 
@@ -68,13 +66,14 @@
       <div class="usage-row">
         <div>
           <span>Today</span>
-          <strong id="todayUsage">—</strong>
+          <strong id="todayUsage">Loading…</strong>
         </div>
         <div>
           <span>Most visited</span>
-          <strong id="mostVisitedSite">—</strong>
+          <strong id="mostVisitedSite">Loading…</strong>
         </div>
       </div>
+      <p class="inline-state" id="usageSummaryState" role="status"></p>
     </section>
 
     </section>
