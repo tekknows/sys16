@@ -1,6 +1,6 @@
-# MINDLOCK
+# LOCTIV
 
-MINDLOCK is a browser-extension and admin-dashboard productivity platform built for managed company laptops. The project combines a Supabase-backed admin dashboard with an employee browser extension that enforces scheduled website blocking and supports issue tracking.
+LOCTIV is a browser-extension and admin-dashboard productivity platform built for managed company laptops. The project combines a Supabase-backed admin dashboard with an employee browser extension that enforces scheduled website blocking and supports issue tracking.
 
 ## Project structure
 
@@ -14,6 +14,7 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - `supabase/migrations/005_admin_device_details.sql` — laptop MAC address storage and staff profile updates
 - `supabase/migrations/006_blocking_rule_employee_targets.sql` — optional employee-specific website blocking policies
 - `supabase/migrations/007_device_registration_monitoring.sql` — secure device registration, assignment history, and heartbeat connection logs
+- `supabase/migrations/008_settings_retention_and_assignment.sql` — persistent settings, retention cleanup, and assignment expiry
 - `supabase/functions/device-registration/` — admin-only device registration and revocation endpoint
 - `supabase/functions/device-heartbeat/` — credential-verified laptop heartbeat endpoint
 - `supabase/functions/employee-account/` — administrator-only employee Auth account and profile creation endpoint
@@ -36,6 +37,7 @@ MINDLOCK is a browser-extension and admin-dashboard productivity platform built 
 - Run `supabase/migrations/005_admin_device_details.sql` after migration 004.
 - Run `supabase/migrations/006_blocking_rule_employee_targets.sql` after migration 005 to enable policies for one employee; policies can also apply to all employees.
 - Run `supabase/migrations/007_device_registration_monitoring.sql` after migration 006.
+- Run `supabase/migrations/008_settings_retention_and_assignment.sql` after migration 007.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js`, the extension, or the Windows agent.
 - Deploy from the project root with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt`. The registration endpoint checks the admin JWT itself; the heartbeat endpoint authenticates the device credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.

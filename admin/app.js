@@ -29,6 +29,7 @@ let blockingTargetSchemaReady = true;
 let ticketStatusCounts = {};
 let monitoringRefreshTimer = null;
 let deviceMonitoringSchemaReady = false;
+let systemSettings = {};
 
 function isSupabaseConfigured() {
   const config = window.MINDLOCK_CONFIG;
@@ -107,6 +108,23 @@ async function refreshSelectedTicket() {
 
 function saveState(nextState) {
   localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(nextState));
+}
+
+function getSystemSetting(key, fallback) {
+  return systemSettings[key] === undefined ? fallback : systemSettings[key];
+}
+
+async function saveSystemSettings(values) {
+  const client = getSupabaseClient();
+  if (!client || !adminUser) throw new Error('Your admin session has expired. Sign in again.');
+  const rows = Object.entries(values).map(([setting_key, setting_value]) => ({
+    setting_key,
+    setting_value,
+    updated_by: adminUser.id,
+  }));
+  const { error } = await client.from('system_settings').upsert(rows, { onConflict: 'setting_key' });
+  if (error) throw error;
+  Object.assign(systemSettings, values);
 }
 
 function applyTheme(themeName, accentColor, applyAccent = false) {
@@ -221,6 +239,57 @@ function renderMetricCards() {
   statsGrid.innerHTML = stats.map(([label, value]) => `
     <article class="stat-card"><span class="metric-label">${label}</span><strong class="metric-value">${value}</strong></article>
   `).join('');
+}
+
+function renderDashboardAttention() {
+  const summary = document.getElementById('dashboardAttentionSummary');
+  const detail = document.getElementById('dashboardAttentionDetail');
+  if (!summary || !detail) return;
+  const urgentTickets = ticketsOnPage.filter((ticket) => ticket.priority === 'Urgent' && !['Resolved', 'Closed'].includes(ticket.status)).length;
+  const disposalLaptops = directoryLaptops.filter((laptop) => laptop.status === 'Retired').length;
+  const pending = changeRequests.filter((request) => request.status === 'Pending').length;
+  const issues = [];
+  if (urgentTickets) issues.push(`${urgentTickets} urgent ticket${urgentTickets === 1 ? '' : 's'}`);
+  if (pending) issues.push(`${pending} pending change request${pending === 1 ? '' : 's'}`);
+  if (disposalLaptops) issues.push(`${disposalLaptops} disposal laptop${disposalLaptops === 1 ? '' : 's'}`);
+  summary.textContent = issues.length ? issues.join(' · ') : 'No urgent tickets or defective laptops';
+  detail.textContent = issues.length ? 'Review these items from the relevant dashboard sections.' : 'Everything is up to date.';
+}
+
+function settingValue(key, fallback) {
+  const setting = getSystemSetting(key, fallback);
+  if (setting && typeof setting === 'object') {
+    if ('value' in setting) return setting.value;
+    if ('enabled' in setting) return setting.enabled;
+  }
+  return setting;
+}
+
+function renderSettingsForms() {
+  const general = document.getElementById('generalSettingsForm');
+  if (general) {
+    general.elements.companyName.value = settingValue('company_name', 'LOCTIV');
+    general.elements.timezone.value = settingValue('timezone', 'UTC');
+    general.elements.notificationPreference.value = settingValue('notification_preferences', 'Email + In-app');
+  }
+  const ticket = document.getElementById('ticketSettingsForm');
+  if (ticket) {
+    ticket.elements.defaultTicketStatus.value = settingValue('ticket_default_status', 'Open');
+    ticket.elements.ticketPrefix.value = settingValue('ticket_id_prefix', 'TKT');
+    ticket.elements.supportInstructions.value = settingValue('support_instructions', '');
+  }
+  const retention = document.getElementById('retentionSettingsForm');
+  if (retention) {
+    retention.elements.messageRetentionDays.value = settingValue('message_retention_days', 30);
+    retention.elements.messageAutoCleanup.checked = settingValue('message_auto_cleanup', true);
+    retention.elements.ticketCleanupDays.value = settingValue('resolved_ticket_cleanup_days', 3);
+    retention.elements.historyRetentionDays.value = settingValue('retention_history_days', 90);
+    retention.elements.keepMessagesIndefinitely.checked = settingValue('keep_messages_indefinitely', false);
+    retention.elements.policySyncEnabled.checked = settingValue('policy_sync_enabled', true);
+    retention.elements.disposalCleanupDays.value = settingValue('disposal_laptop_cleanup_days', 30);
+  }
+  const incognito = document.getElementById('incognitoSettingsForm');
+  if (incognito) incognito.querySelector('#incognitoToggle').checked = settingValue('global_incognito_policy', false);
 }
 
 function renderActivityList() {
@@ -354,9 +423,10 @@ function renderAssignmentTable() {
           <td>${escapeHtml(row.employee.name)}</td>
           <td>${escapeHtml(row.laptop.laptop_id)}</td>
           <td>${escapeHtml(formatDate(row.assigned_at))}</td>
+          <td>${row.expires_at ? escapeHtml(formatDate(row.expires_at)) : 'Indefinite'}</td>
           <td><span class="status-pill ${row.status === 'Active' ? 'success' : 'neutral'}">${escapeHtml(row.status)}</span></td>
         </tr>
-      `).join('') : '<tr><td colspan="5">No laptop assignments.</td></tr>';
+      `).join('') : '<tr><td colspan="6">No laptop assignments.</td></tr>';
 }
 
 function renderAssignmentOptions() {
@@ -402,8 +472,9 @@ function renderEmployeeTable() {
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
         <td>${escapeHtml(formatDate(assignment?.laptop.last_seen_at || registration?.last_heartbeat_at))}</td>
         <td>${statusPill(row.active ? (row.account_status || 'Active') : 'Suspended')}</td>
+        <td><button type="button" class="text-btn employee-password-btn" data-employee-id="${escapeHtml(row.profile_id)}">Reset password</button></td>
       </tr>`;
-    }).join('') || '<tr><td colspan="8">No employees found.</td></tr>';
+    }).join('') || '<tr><td colspan="9">No employees found.</td></tr>';
 }
 
 function renderUserRoleAssignments() {
@@ -475,17 +546,20 @@ async function loadDashboardData() {
   try {
     const { error: connectionCloseError } = await client.rpc('close_stale_device_connections');
     if (connectionCloseError) throw connectionCloseError;
+    const { error: assignmentCloseError } = await client.rpc('close_expired_laptop_assignments');
+    if (assignmentCloseError && !/close_expired_laptop_assignments/i.test(assignmentCloseError.message)) throw assignmentCloseError;
     const results = await Promise.all([
       client.from('employees').select('id,profile_id,user_id,department,position,active').order('created_at', { ascending: false }),
       client.from('profiles').select('id,full_name,email,department,position,account_status'),
       client.from('user_roles').select('profile_id,role_name').is('revoked_at', null),
       client.from('laptops').select('id,laptop_id,device_registration_id,device_name,manufacturer,model,serial_number,mac_address,operating_system,browser,extension_version,status,last_sync_at,last_seen_at').order('created_at', { ascending: false }),
-      client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at,ended_at').order('assigned_at', { ascending: false }),
+      client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at,ended_at,expires_at').order('assigned_at', { ascending: false }),
       client.from('laptop_change_requests').select('id,profile_id,request_type,reason,status,created_at').order('created_at', { ascending: false }).limit(100),
       client.from('change_logs').select('id,action,module_name,created_at').order('created_at', { ascending: false }).limit(8),
       client.from('notifications').select('id,title,body,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
       client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
       client.from('device_connection_logs').select('id,laptop_id,employee_id,device_registration_id,connection_started_at,connection_ended_at,last_heartbeat_at,connection_status,recorded_at').order('recorded_at', { ascending: false }).limit(500),
+      client.from('system_settings').select('setting_key,setting_value'),
     ]);
     let laptopResult = results[3];
     if (laptopResult.error && /mac_address/i.test(laptopResult.error.message)) {
@@ -541,7 +615,8 @@ async function loadDashboardData() {
     if (!hasTargetColumn) {
       ruleResult.data = (ruleResult.data || []).map((rule) => ({ ...rule, target_profile_id: null }));
     }
-    const [employeeResult, profileResult, roleResult, , assignmentResult, requestResult, logResult, notificationResult, registrationResult, historyResult] = results;
+    const [employeeResult, profileResult, roleResult, , assignmentResult, requestResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
+    systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
     const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
     const roles = new Map((roleResult.data || []).map((role) => [role.profile_id, role.role_name]));
     directoryEmployees = (employeeResult.data || []).map((employee) => {
@@ -593,7 +668,11 @@ async function loadDashboardData() {
     }));
     activityLogs = logResult.data || [];
     notifications = notificationResult.data || [];
+    renderSettingsForms();
+    const assignmentRetentionInput = document.getElementById('assignmentRetentionDays');
+    if (assignmentRetentionInput) assignmentRetentionInput.value = settingValue('assignment_retention_days', 30);
     renderMetricCards();
+    renderDashboardAttention();
     renderActivityList();
     renderNotifications();
     renderBlockingTable();
@@ -863,6 +942,7 @@ async function loadTickets() {
     ticketCount = 0;
     ticketStatusCounts = {};
     renderTicketTable();
+    renderDashboardAttention();
     renderTicketLegend();
     setTicketListState('Connect Supabase in admin/config.js and sign in to load tickets.');
     updateTicketPagination();
@@ -1744,6 +1824,23 @@ function setupDashboardInteractions() {
       saveState(nextState);
     });
   }
+  document.getElementById('saveThemeSettingsBtn')?.addEventListener('click', async (event) => {
+    const state = document.getElementById('themeSettingsState');
+    event.currentTarget.disabled = true;
+    try {
+      await saveSystemSettings({ dashboard_accent: { value: accentColorInput.value } });
+      state.textContent = 'Theme settings saved.';
+      state.classList.remove('hidden', 'error-text');
+      showToast('Theme settings saved.');
+    } catch (error) {
+      state.textContent = `Theme settings could not be saved: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      showToast(state.textContent, true);
+    } finally {
+      event.currentTarget.disabled = false;
+    }
+  });
 
   document.querySelectorAll('.tab-link').forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -1756,6 +1853,72 @@ function setupDashboardInteractions() {
         const active = link === tab;
         link.classList.toggle('active', active);
         link.setAttribute('aria-selected', String(active));
+      });
+
+      const bindSettingsForm = (id, settings, stateId) => {
+        document.getElementById(id)?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const state = document.getElementById(stateId);
+          const button = form.querySelector('button[type="submit"]');
+          button.disabled = true;
+          state.classList.add('hidden');
+          try {
+            await saveSystemSettings(settings(form));
+            state.textContent = 'Settings saved.';
+            state.classList.remove('hidden', 'error-text');
+            showToast('Settings saved.');
+          } catch (error) {
+            state.textContent = `Settings could not be saved: ${error.message}`;
+            state.classList.remove('hidden');
+            state.classList.add('error-text');
+            showToast(state.textContent, true);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      };
+      bindSettingsForm('generalSettingsForm', (form) => ({
+        company_name: { value: form.elements.companyName.value.trim() },
+        timezone: { value: form.elements.timezone.value.trim() },
+        notification_preferences: { value: form.elements.notificationPreference.value },
+      }), 'generalSettingsState');
+      bindSettingsForm('ticketSettingsForm', (form) => ({
+        ticket_default_status: { value: form.elements.defaultTicketStatus.value },
+        ticket_id_prefix: { value: form.elements.ticketPrefix.value.trim().toUpperCase() },
+        support_instructions: { value: form.elements.supportInstructions.value.trim() },
+      }), 'ticketSettingsState');
+      bindSettingsForm('retentionSettingsForm', (form) => ({
+        message_retention_days: Number(form.elements.messageRetentionDays.value),
+        message_auto_cleanup: form.elements.messageAutoCleanup.checked,
+        resolved_ticket_cleanup_days: Number(form.elements.ticketCleanupDays.value),
+        retention_history_days: Number(form.elements.historyRetentionDays.value),
+        keep_messages_indefinitely: form.elements.keepMessagesIndefinitely.checked,
+        policy_sync_enabled: form.elements.policySyncEnabled.checked,
+        disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
+      }), 'retentionSettingsState');
+      document.getElementById('incognitoSettingsForm')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          await saveSystemSettings({ global_incognito_policy: event.currentTarget.querySelector('#incognitoToggle').checked });
+          document.getElementById('incognitoStatus').textContent = event.currentTarget.querySelector('#incognitoToggle').checked ? 'Enabled' : 'Disabled';
+          showToast('Incognito setting saved.');
+        } catch (error) {
+          showToast(`Incognito setting could not be saved: ${error.message}`, true);
+        }
+      });
+      document.getElementById('cleanupDisposalBtn')?.addEventListener('click', async () => {
+        const days = Number(document.querySelector('#retentionSettingsForm [name="disposalCleanupDays"]').value);
+        if (!Number.isInteger(days) || days < 1 || !window.confirm(`Delete retired laptops older than ${days} days?`)) return;
+        try {
+          const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+          const { error } = await getSupabaseClient().from('laptops').delete().eq('status', 'Retired').lt('created_at', cutoff);
+          if (error) throw error;
+          await loadDashboardData();
+          showToast('Disposal laptops cleaned up.');
+        } catch (error) {
+          showToast(`Disposal cleanup failed: ${error.message}`, true);
+        }
       });
       document.querySelectorAll('.tab-panel').forEach((panel) => {
         panel.classList.toggle('active', panel === target);
@@ -1857,10 +2020,15 @@ function setupDashboardInteractions() {
       event.preventDefault();
       const employeeId = document.getElementById('assignmentEmployee').value;
       const laptopId = document.getElementById('assignmentLaptop').value;
+      const retentionDays = Number(document.getElementById('assignmentRetentionDays').value);
       const employee = directoryEmployees.find((row) => row.id === employeeId);
       const laptop = directoryLaptops.find((row) => row.id === laptopId);
       if (!employee || !laptop || laptop.status === 'Retired' || !employee.active) {
         setDashboardState('Choose an active employee and a laptop that is not retired.', true);
+        return;
+      }
+      if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 3650) {
+        setDashboardState('Assignment retention must be between 1 and 3650 days.', true);
         return;
       }
       try {
@@ -1868,6 +2036,7 @@ function setupDashboardInteractions() {
           p_employee_id: employee.id,
           p_laptop_id: laptop.id,
           p_assigned_by: adminUser.id,
+          p_retention_days: retentionDays,
         });
         if (error) throw error;
         await writeChangeLog('Assigned or reassigned laptop', 'Assignments', laptop.laptop_id);
@@ -1917,6 +2086,31 @@ function setupDashboardInteractions() {
 
   document.getElementById('employeeSearch')?.addEventListener('input', renderEmployeeTable);
   document.getElementById('employeeStatusFilter')?.addEventListener('change', renderEmployeeTable);
+  document.getElementById('employeeTable')?.addEventListener('click', async (event) => {
+    const button = event.target.closest('.employee-password-btn');
+    if (!button) return;
+    const employee = directoryEmployees.find((row) => row.profile_id === button.dataset.employeeId);
+    if (!employee) return;
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
+    const values = new Uint32Array(16);
+    crypto.getRandomValues(values);
+    const password = Array.from(values, (value) => alphabet[value % alphabet.length]).join('');
+    if (!window.confirm(`Generate a new temporary password for ${employee.name}?`)) return;
+    button.disabled = true;
+    try {
+      const result = await invokeSupabaseFunction('employee-account', {
+        action: 'reset_password',
+        user_id: employee.profile_id,
+        password,
+      });
+      window.alert(`Temporary password for ${employee.name}:\n\n${result.password}`);
+      await writeChangeLog('Reset employee password', 'Employees', employee.user_id);
+    } catch (error) {
+      showToast(`Password reset failed: ${error.message}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
   document.getElementById('laptopSearch')?.addEventListener('input', renderLaptopTable);
   document.getElementById('laptopStatusFilter')?.addEventListener('change', renderLaptopTable);
   ['ticketSearch', 'ticketStatusFilter', 'ticketCategoryFilter'].forEach((id) => {

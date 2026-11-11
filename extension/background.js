@@ -136,7 +136,7 @@ async function checkForTicketReplies() {
       chrome.notifications.create(`mindlock-reply-${reply.id}`, {
         type: 'basic',
         iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-        title: 'New MINDLOCK support reply',
+        title: 'New LOCTIV support reply',
         message: 'IT staff replied to your support ticket.',
       });
       notified.add(reply.id);

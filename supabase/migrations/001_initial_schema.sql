@@ -396,9 +396,21 @@ on conflict (category_name) do nothing;
 
 insert into public.system_settings (setting_key, setting_value)
 values
-  ('company_name', '{"value":"MINDLOCK"}'::jsonb),
+  ('company_name', '{"value":"LOCTIV"}'::jsonb),
   ('timezone', '{"value":"UTC"}'::jsonb),
   ('ticket_retention_days', '{"value":90}'::jsonb),
   ('global_incognito_policy', '{"enabled":false}'::jsonb),
-  ('dashboard_accent', '{"value":"#2563eb"}'::jsonb)
+  ('dashboard_accent', '{"value":"#2563eb"}'::jsonb),
+  ('notification_preferences', '{"value":"Email + In-app"}'::jsonb),
+  ('ticket_default_status', '{"value":"Open"}'::jsonb),
+  ('ticket_id_prefix', '{"value":"TKT"}'::jsonb),
+  ('support_instructions', '{"value":""}'::jsonb),
+  ('message_retention_days', '30'::jsonb),
+  ('message_auto_cleanup', 'true'::jsonb),
+  ('resolved_ticket_cleanup_days', '3'::jsonb),
+  ('retention_history_days', '90'::jsonb),
+  ('keep_messages_indefinitely', 'false'::jsonb),
+  ('policy_sync_enabled', 'true'::jsonb),
+  ('disposal_laptop_cleanup_days', '30'::jsonb),
+  ('assignment_retention_days', '30'::jsonb)
 on conflict (setting_key) do nothing;
