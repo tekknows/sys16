@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "LOCTIV Employee Console",
+  "name": "MINDLOCK Employee Console",
   "version": "1.0.0",
   "description": "Company productivity and support extension for managed laptops.",
   "permissions": ["storage", "tabs", "declarativeNetRequestWithHostAccess", "scripting", "alarms", "notifications"],
@@ -9,7 +9,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "LOCTIV",
+    "default_title": "MINDLOCK",
     "default_popup": "popup.html",
     "default_icon": "icons/icon128.png"
   },

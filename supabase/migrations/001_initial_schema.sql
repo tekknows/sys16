@@ -4,12 +4,30 @@
 
 create extension if not exists pgcrypto;
 
-create type public.user_role_name as enum ('Administrator', 'IT Staff', 'Employee');
-create type public.assignment_status as enum ('Active', 'Terminated', 'Pending');
-create type public.laptop_status as enum ('Available', 'Assigned', 'Maintenance', 'Retired');
-create type public.ticket_status as enum ('Open', 'In Progress', 'Waiting for Employee', 'Resolved', 'Closed');
-create type public.request_status as enum ('Pending', 'Approved', 'Rejected', 'Completed', 'Cancelled');
-create type public.policy_status as enum ('Enabled', 'Disabled');
+do $$ begin
+  create type public.user_role_name as enum ('Administrator', 'IT Staff', 'Employee');
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  create type public.assignment_status as enum ('Active', 'Terminated', 'Pending');
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  create type public.laptop_status as enum ('Available', 'Assigned', 'Maintenance', 'Retired');
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  create type public.ticket_status as enum ('Open', 'In Progress', 'Waiting for Employee', 'Resolved', 'Closed');
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  create type public.request_status as enum ('Pending', 'Approved', 'Rejected', 'Completed', 'Cancelled');
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  create type public.policy_status as enum ('Enabled', 'Disabled');
+exception when duplicate_object then null;
+end $$;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -353,18 +371,23 @@ begin
 end;
 $$;
 
+drop trigger if exists set_profiles_updated_at on public.profiles;
 create trigger set_profiles_updated_at before update on public.profiles
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_employees_updated_at on public.employees;
 create trigger set_employees_updated_at before update on public.employees
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_laptops_updated_at on public.laptops;
 create trigger set_laptops_updated_at before update on public.laptops
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_tickets_updated_at on public.tickets;
 create trigger set_tickets_updated_at before update on public.tickets
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_settings_updated_at on public.system_settings;
 create trigger set_settings_updated_at before update on public.system_settings
 for each row execute function public.set_updated_at();
 
