@@ -213,6 +213,22 @@ h1, h2 {
   font-weight: 700;
 }
 
+.release-notes {
+  margin-top: 12px;
+}
+
+.release-notes .muted-copy {
+  margin-bottom: 8px;
+}
+
+.release-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .ticket-list {
   list-style: none;
   display: grid;

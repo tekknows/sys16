@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LOCTIV Employee Console",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Company productivity and support extension for managed laptops.",
   "permissions": ["storage", "tabs", "declarativeNetRequestWithHostAccess", "scripting", "alarms", "notifications"],
   "host_permissions": ["<all_urls>"],

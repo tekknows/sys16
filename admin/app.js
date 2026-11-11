@@ -1,5 +1,5 @@
 const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
-const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.1.0';
+const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.2.0';
 
 const TICKET_PAGE_SIZE = 10;
 const TICKET_STATUSES = ['Open', 'In Progress', 'Waiting for Employee', 'Waiting for IT', 'Resolved', 'Closed'];
