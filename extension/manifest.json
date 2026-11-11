@@ -11,10 +11,10 @@
   "action": {
     "default_title": "MINDLOCK",
     "default_popup": "popup.html",
-    "default_icon": "logo.png"
+    "default_icon": "icons/icon128.png"
   },
   "icons": {
-    "128": "logo.png"
+    "128": "icons/icon128.png"
   },
   "web_accessible_resources": [{
     "resources": ["blocked.html"],
