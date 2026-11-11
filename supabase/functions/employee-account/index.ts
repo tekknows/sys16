@@ -87,16 +87,6 @@ Deno.serve(async (request) => {
     if (!admin) return jsonResponse({ error: 'Administrator access is required.' }, 403);
 
     const body = await request.json();
-    if (body.action === 'reset_password') {
-      const userId = String(body.user_id || '').trim();
-      const password = String(body.password || '');
-      if (!userId || password.length < 8) return jsonResponse({ error: 'A valid user and password with at least 8 characters are required.' }, 400);
-      await restRequest(config, `/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ password }),
-      });
-      return jsonResponse({ user_id: userId, password, message: 'Employee password reset.' });
-    }
     const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
     const fullName = String(body.full_name || '').trim();

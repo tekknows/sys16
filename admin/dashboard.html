@@ -3,8 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LOCTIV Admin Dashboard</title>
-    <link rel="icon" href="logo.svg" type="image/svg+xml" />
+    <title>MINDLOCK Admin Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="dashboard-page">
@@ -12,10 +11,10 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <div class="brand-block">
-            <img class="brand-logo" src="logo.svg" alt="" />
+            <div class="brand-mark">M</div>
             <div>
               <span class="eyebrow">Admin Portal</span>
-              <h1>LOCTIV</h1>
+              <h1>MINDLOCK</h1>
             </div>
           </div>
           <button class="sidebar-toggle" id="sidebarToggleBtn" aria-label="Minimize navigation" aria-expanded="true" title="Minimize navigation">
@@ -63,11 +62,6 @@
         <p id="dashboardDataState" class="dashboard-data-state hidden" role="status"></p>
 
         <section id="dashboard" class="module-panel active">
-          <div class="attention-card" id="dashboardAttention">
-            <h3>Needs attention</h3>
-            <p id="dashboardAttentionSummary">Loading current issues…</p>
-            <p id="dashboardAttentionDetail"></p>
-          </div>
           <div class="stats-grid" id="statsGrid"></div>
 
           <div class="content-grid two-col">
@@ -203,10 +197,6 @@
                 <span>Laptop</span>
                 <select id="assignmentLaptop"><option value="">Select a laptop</option></select>
               </label>
-              <label>
-                <span>Assignment retention (days)</span>
-                <input id="assignmentRetentionDays" type="number" min="1" max="3650" value="30" required />
-              </label>
               <p class="span-2 panel-subtitle">Reassigning an employee or laptop preserves the previous assignment in the history.</p>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Assign laptop</button>
@@ -227,7 +217,6 @@
                   <th>Employee</th>
                   <th>Laptop</th>
                   <th>Assigned date</th>
-                  <th>Retention</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -282,7 +271,6 @@
                   <th>Connection</th>
                   <th>Last seen</th>
                   <th>Account status</th>
-                  <th>Edit</th>
                 </tr>
               </thead>
               <tbody id="employeeTable"></tbody>
@@ -433,7 +421,6 @@
               <button class="tab-link" data-tab="roles">Role & Access</button>
               <button class="tab-link" data-tab="theme">Theme</button>
               <button class="tab-link" data-tab="ticket-settings">Ticket Settings</button>
-              <button class="tab-link" data-tab="retention">Retention</button>
               <button class="tab-link" data-tab="incognito">Incognito</button>
             </div>
 
@@ -441,12 +428,11 @@
               <div class="tab-panel active" id="general">
                 <div class="panel-card">
                   <h3>General settings</h3>
-                  <form class="form-grid compact settings-form" id="generalSettingsForm">
-                    <label><span>Company name</span><input name="companyName" value="LOCTIV" required /></label>
-                    <label><span>Time zone</span><input name="timezone" value="UTC" required /></label>
-                    <label><span>Notification preferences</span><select name="notificationPreference"><option>Email + In-app</option><option>In-app only</option><option>Email only</option><option>Disabled</option></select></label>
-                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save general settings</button></div>
-                    <p class="span-2 form-state hidden" id="generalSettingsState" role="status"></p>
+                  <form class="form-grid compact">
+                    <label><span>Company name</span><input value="MINDLOCK" /></label>
+                    <label><span>Time zone</span><input value="UTC" /></label>
+                    <label><span>Notification preferences</span><input value="Email + In-app" /></label>
+                    <label><span>System preferences</span><input value="Default" /></label>
                   </form>
                 </div>
               </div>
@@ -499,37 +485,15 @@
                   <h3>Theme settings</h3>
                   <label><span>Dashboard accent color</span><input type="color" value="#2563eb" id="accentColor" /></label>
                   <div class="preview-box" id="accentPreview">Accent preview</div>
-                  <div class="actions-row"><button type="button" class="primary-btn" id="saveThemeSettingsBtn">Save theme settings</button></div>
-                  <p class="form-state hidden" id="themeSettingsState" role="status"></p>
                 </div>
               </div>
 
               <div class="tab-panel" id="ticket-settings">
                 <div class="panel-card">
                   <h3>Ticket settings</h3>
-                  <form class="form-grid compact settings-form" id="ticketSettingsForm">
-                    <label><span>Default ticket status</span><select name="defaultTicketStatus"><option>Open</option><option>In Progress</option><option>Waiting for Employee</option><option>Resolved</option><option>Closed</option></select></label>
-                    <label><span>Ticket ID prefix</span><input name="ticketPrefix" value="TKT" maxlength="12" required /></label>
-                    <label class="span-2"><span>Support instructions</span><textarea name="supportInstructions" rows="3" placeholder="Tell employees when to contact support."></textarea></label>
-                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save ticket settings</button></div>
-                    <p class="span-2 form-state hidden" id="ticketSettingsState" role="status"></p>
-                  </form>
-                </div>
-              </div>
-
-              <div class="tab-panel" id="retention">
-                <div class="panel-card">
-                  <h3>Retention</h3>
-                  <form class="form-grid compact settings-form" id="retentionSettingsForm">
-                    <label><span>Message retention (days)</span><input name="messageRetentionDays" type="number" min="1" max="3650" value="30" required /></label>
-                    <label class="checkbox-row"><input name="messageAutoCleanup" type="checkbox" checked /><span>Auto cleanup messages</span></label>
-                    <label><span>Resolved/closed ticket cleanup (days)</span><input name="ticketCleanupDays" type="number" min="1" max="3650" value="3" required /></label>
-                    <label><span>Keep retention history (days)</span><input name="historyRetentionDays" type="number" min="1" max="3650" value="90" required /></label>
-                    <label class="checkbox-row"><input name="keepMessagesIndefinitely" type="checkbox" /><span>Keep messages indefinitely</span></label>
-                    <label class="checkbox-row"><input name="policySyncEnabled" type="checkbox" checked /><span>Policy sync enabled</span></label>
-                    <label><span>Disposal laptop cleanup (days)</span><input name="disposalCleanupDays" type="number" min="1" max="3650" value="30" required /></label>
-                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save retention settings</button><button type="button" class="secondary-btn" id="cleanupDisposalBtn">Delete disposal laptops</button></div>
-                    <p class="span-2 form-state hidden" id="retentionSettingsState" role="status"></p>
+                  <form class="form-grid compact">
+                    <label><span>Ticket retention</span><input value="90 days" /></label>
+                    <label><span>Cleanup preview</span><input value="12 completed tickets" /></label>
                   </form>
                 </div>
               </div>
@@ -537,14 +501,13 @@
               <div class="tab-panel" id="incognito">
                 <div class="panel-card">
                   <h3>Global Incognito / InPrivate blocker</h3>
-                  <form class="incognito-control settings-form" id="incognitoSettingsForm">
+                  <div class="incognito-control">
                     <div><strong>Enable global policy</strong><p>Requested policy state. Device enforcement is reported by managed endpoint sync.</p></div>
                     <label class="switch" aria-label="Toggle global Incognito policy">
                       <input type="checkbox" id="incognitoToggle" />
                       <span class="switch-slider"></span>
                     </label>
-                    <button class="primary-btn" type="submit">Save incognito setting</button>
-                  </form>
+                  </div>
                   <p>Requested status: <strong id="incognitoStatus">Disabled</strong></p>
                 </div>
               </div>
@@ -572,7 +535,7 @@
           </ul>
           <hr />
           <div class="version-banner"><span>Version</span><strong>1.0.0</strong><time datetime="2026-11-06">November 6, 2026</time></div>
-          <h3>Initial LOCTIV release</h3>
+          <h3>Initial MINDLOCK release</h3>
           <p>Admin dashboard and employee extension foundation.</p>
           <ul>
             <li>Employee, laptop, ticket, and website schedule modules</li>
