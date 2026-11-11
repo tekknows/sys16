@@ -289,7 +289,11 @@ function renderSettingsForms() {
     retention.elements.disposalCleanupDays.value = settingValue('disposal_laptop_cleanup_days', 30);
   }
   const incognito = document.getElementById('incognitoSettingsForm');
-  if (incognito) incognito.querySelector('#incognitoToggle').checked = settingValue('global_incognito_policy', false);
+  if (incognito) {
+    const enabled = Boolean(settingValue('global_incognito_policy', false));
+    incognito.querySelector('#incognitoToggle').checked = enabled;
+    document.getElementById('incognitoStatus').textContent = enabled ? 'Enabled' : 'Disabled';
+  }
 }
 
 function renderActivityList() {
