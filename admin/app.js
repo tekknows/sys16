@@ -289,11 +289,7 @@ function renderSettingsForms() {
     retention.elements.disposalCleanupDays.value = settingValue('disposal_laptop_cleanup_days', 30);
   }
   const incognito = document.getElementById('incognitoSettingsForm');
-  if (incognito) {
-    const enabled = Boolean(settingValue('global_incognito_policy', false));
-    incognito.querySelector('#incognitoToggle').checked = enabled;
-    document.getElementById('incognitoStatus').textContent = enabled ? 'Enabled' : 'Disabled';
-  }
+  if (incognito) incognito.querySelector('#incognitoToggle').checked = settingValue('global_incognito_policy', false);
 }
 
 function renderActivityList() {
@@ -1859,76 +1855,75 @@ function setupDashboardInteractions() {
         link.setAttribute('aria-selected', String(active));
       });
 
+      const bindSettingsForm = (id, settings, stateId) => {
+        document.getElementById(id)?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const state = document.getElementById(stateId);
+          const button = form.querySelector('button[type="submit"]');
+          button.disabled = true;
+          state.classList.add('hidden');
+          try {
+            await saveSystemSettings(settings(form));
+            state.textContent = 'Settings saved.';
+            state.classList.remove('hidden', 'error-text');
+            showToast('Settings saved.');
+          } catch (error) {
+            state.textContent = `Settings could not be saved: ${error.message}`;
+            state.classList.remove('hidden');
+            state.classList.add('error-text');
+            showToast(state.textContent, true);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      };
+      bindSettingsForm('generalSettingsForm', (form) => ({
+        company_name: { value: form.elements.companyName.value.trim() },
+        timezone: { value: form.elements.timezone.value.trim() },
+        notification_preferences: { value: form.elements.notificationPreference.value },
+      }), 'generalSettingsState');
+      bindSettingsForm('ticketSettingsForm', (form) => ({
+        ticket_default_status: { value: form.elements.defaultTicketStatus.value },
+        ticket_id_prefix: { value: form.elements.ticketPrefix.value.trim().toUpperCase() },
+        support_instructions: { value: form.elements.supportInstructions.value.trim() },
+      }), 'ticketSettingsState');
+      bindSettingsForm('retentionSettingsForm', (form) => ({
+        message_retention_days: Number(form.elements.messageRetentionDays.value),
+        message_auto_cleanup: form.elements.messageAutoCleanup.checked,
+        resolved_ticket_cleanup_days: Number(form.elements.ticketCleanupDays.value),
+        retention_history_days: Number(form.elements.historyRetentionDays.value),
+        keep_messages_indefinitely: form.elements.keepMessagesIndefinitely.checked,
+        policy_sync_enabled: form.elements.policySyncEnabled.checked,
+        disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
+      }), 'retentionSettingsState');
+      document.getElementById('incognitoSettingsForm')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          await saveSystemSettings({ global_incognito_policy: event.currentTarget.querySelector('#incognitoToggle').checked });
+          document.getElementById('incognitoStatus').textContent = event.currentTarget.querySelector('#incognitoToggle').checked ? 'Enabled' : 'Disabled';
+          showToast('Incognito setting saved.');
+        } catch (error) {
+          showToast(`Incognito setting could not be saved: ${error.message}`, true);
+        }
+      });
+      document.getElementById('cleanupDisposalBtn')?.addEventListener('click', async () => {
+        const days = Number(document.querySelector('#retentionSettingsForm [name="disposalCleanupDays"]').value);
+        if (!Number.isInteger(days) || days < 1 || !window.confirm(`Delete retired laptops older than ${days} days?`)) return;
+        try {
+          const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+          const { error } = await getSupabaseClient().from('laptops').delete().eq('status', 'Retired').lt('created_at', cutoff);
+          if (error) throw error;
+          await loadDashboardData();
+          showToast('Disposal laptops cleaned up.');
+        } catch (error) {
+          showToast(`Disposal cleanup failed: ${error.message}`, true);
+        }
+      });
       document.querySelectorAll('.tab-panel').forEach((panel) => {
         panel.classList.toggle('active', panel === target);
       });
     });
-  });
-
-  const bindSettingsForm = (id, settings, stateId) => {
-    document.getElementById(id)?.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const state = document.getElementById(stateId);
-      const button = form.querySelector('button[type="submit"]');
-      button.disabled = true;
-      state.classList.add('hidden');
-      try {
-        await saveSystemSettings(settings(form));
-        state.textContent = 'Settings saved.';
-        state.classList.remove('hidden', 'error-text');
-        showToast('Settings saved.');
-      } catch (error) {
-        state.textContent = `Settings could not be saved: ${error.message}`;
-        state.classList.remove('hidden');
-        state.classList.add('error-text');
-        showToast(state.textContent, true);
-      } finally {
-        button.disabled = false;
-      }
-    });
-  };
-  bindSettingsForm('generalSettingsForm', (form) => ({
-    company_name: { value: form.elements.companyName.value.trim() },
-    timezone: { value: form.elements.timezone.value.trim() },
-    notification_preferences: { value: form.elements.notificationPreference.value },
-  }), 'generalSettingsState');
-  bindSettingsForm('ticketSettingsForm', (form) => ({
-    ticket_default_status: { value: form.elements.defaultTicketStatus.value },
-    ticket_id_prefix: { value: form.elements.ticketPrefix.value.trim().toUpperCase() },
-    support_instructions: { value: form.elements.supportInstructions.value.trim() },
-  }), 'ticketSettingsState');
-  bindSettingsForm('retentionSettingsForm', (form) => ({
-    message_retention_days: Number(form.elements.messageRetentionDays.value),
-    message_auto_cleanup: form.elements.messageAutoCleanup.checked,
-    resolved_ticket_cleanup_days: Number(form.elements.ticketCleanupDays.value),
-    retention_history_days: Number(form.elements.historyRetentionDays.value),
-    keep_messages_indefinitely: form.elements.keepMessagesIndefinitely.checked,
-    policy_sync_enabled: form.elements.policySyncEnabled.checked,
-    disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
-  }), 'retentionSettingsState');
-  document.getElementById('incognitoSettingsForm')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await saveSystemSettings({ global_incognito_policy: event.currentTarget.querySelector('#incognitoToggle').checked });
-      document.getElementById('incognitoStatus').textContent = event.currentTarget.querySelector('#incognitoToggle').checked ? 'Enabled' : 'Disabled';
-      showToast('Incognito setting saved.');
-    } catch (error) {
-      showToast(`Incognito setting could not be saved: ${error.message}`, true);
-    }
-  });
-  document.getElementById('cleanupDisposalBtn')?.addEventListener('click', async () => {
-    const days = Number(document.querySelector('#retentionSettingsForm [name="disposalCleanupDays"]').value);
-    if (!Number.isInteger(days) || days < 1 || !window.confirm(`Delete retired laptops older than ${days} days?`)) return;
-    try {
-      const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-      const { error } = await getSupabaseClient().from('laptops').delete().eq('status', 'Retired').lt('created_at', cutoff);
-      if (error) throw error;
-      await loadDashboardData();
-      showToast('Disposal laptops cleaned up.');
-    } catch (error) {
-      showToast(`Disposal cleanup failed: ${error.message}`, true);
-    }
   });
 
   const scheduleForm = document.getElementById('scheduleForm');
