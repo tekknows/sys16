@@ -35,47 +35,76 @@
       </nav>
 
     <section id="homeView" class="extension-view active">
-    <section class="overview-card">
-      <div class="user-row">
-        <div class="avatar" id="userAvatar" aria-hidden="true">—</div>
-        <div>
-          <strong id="userName">Employee</strong>
-          <small id="employeeMeta">Company device</small>
-        </div>
-      </div>
-      <div class="summary-grid">
-        <div>
-          <span>Active blocking rules</span>
+      <section class="device-status-card">
+        <span class="device-status-badge" id="deviceConnectionStatus" role="status">Checking</span>
+        <h2>Managed device status</h2>
+        <button class="create-ticket-btn" id="createTicketBtn" type="button">Create ticket</button>
+      </section>
+
+      <section class="metric-grid" aria-label="Device summary">
+        <article class="metric-card">
+          <span>Website visits</span>
+          <strong id="todayVisitCount">Loading…</strong>
+          <small>Today</small>
+        </article>
+        <article class="metric-card">
+          <span>Blocked</span>
           <strong id="websiteStatus">Loading…</strong>
-        </div>
-        <div>
-          <span>Assigned device</span>
-          <strong id="assignedDeviceStatus">Loading…</strong>
-        </div>
-      </div>
-    </section>
+          <small>Policies</small>
+        </article>
+        <article class="metric-card">
+          <span>Sync</span>
+          <strong id="syncStatus">—</strong>
+          <small>Last update</small>
+        </article>
+        <article class="metric-card">
+          <span>Tickets</span>
+          <strong id="openTicketCount">Loading…</strong>
+          <small>Open</small>
+        </article>
+      </section>
 
-    <section class="card-block">
-      <h2>Current blocking policy</h2>
-      <p class="muted-copy" id="blockingPolicyState" role="status">Loading policies…</p>
-      <ul id="blockedList" class="list-items"></ul>
-    </section>
-
-    <section class="card-block">
-      <h2>Usage summary</h2>
-      <div class="usage-row">
-        <div>
-          <span>Today</span>
-          <strong id="todayUsage">Loading…</strong>
+      <section class="endpoint-card">
+        <div class="endpoint-heading">
+          <h2>Endpoint details</h2>
+          <span class="endpoint-status" id="endpointStatus">Loading</span>
         </div>
-        <div>
-          <span>Most visited</span>
-          <strong id="mostVisitedSite">Loading…</strong>
+        <div class="endpoint-details">
+          <div class="endpoint-field">
+            <span>Employee</span>
+            <strong id="endpointEmployee">Loading…</strong>
+          </div>
+          <div class="endpoint-field">
+            <span>Device</span>
+            <strong id="endpointDevice">Loading…</strong>
+          </div>
+          <div class="endpoint-field">
+            <span>Model</span>
+            <strong id="endpointModel">—</strong>
+          </div>
         </div>
-      </div>
-      <p class="inline-state" id="usageSummaryState" role="status"></p>
-    </section>
+      </section>
 
+      <section class="card-block">
+        <h2>Current blocking policy</h2>
+        <p class="muted-copy" id="blockingPolicyState" role="status">Loading policies…</p>
+        <ul id="blockedList" class="list-items"></ul>
+      </section>
+
+      <section class="card-block">
+        <h2>Usage summary</h2>
+        <div class="usage-row">
+          <div>
+            <span>Time today</span>
+            <strong id="todayUsage">Loading…</strong>
+          </div>
+          <div>
+            <span>Most visited</span>
+            <strong id="mostVisitedSite">Loading…</strong>
+          </div>
+        </div>
+        <p class="inline-state" id="usageSummaryState" role="status"></p>
+      </section>
     </section>
 
     <section id="myTicketsView" class="extension-view">

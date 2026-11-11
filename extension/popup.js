@@ -6,6 +6,7 @@ let assignedDevice = null;
 let activeTicket = null;
 let ticketRefreshTimer = null;
 let ticketRealtimeTimer = null;
+let lastPolicySyncAt = null;
 let employeeTheme = 'light';
 
 function isSupabaseConfigured() {
@@ -141,17 +142,49 @@ async function loadCurrentEmployee() {
   if (!employees.length) throw new Error('Your employee record is not set up. Contact IT.');
   employeeProfile = profiles[0];
   employeeRecord = employees[0];
-  const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop:laptops(id,laptop_id,device_registration_id,model)&limit=1`);
-  assignedDevice = assignments[0]?.laptop || null;
-  document.getElementById('userName').textContent = employeeProfile.full_name;
-  document.getElementById('userAvatar').textContent = employeeProfile.full_name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join('') || '—';
-  document.getElementById('employeeMeta').textContent = `${employeeRecord.user_id} · ${assignedDevice?.laptop_id || 'No assigned laptop'}`;
-  document.getElementById('assignedDeviceStatus').textContent = assignedDevice?.laptop_id || 'No assigned laptop';
+}
+
+async function loadAssignedDevice() {
+  try {
+    const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop:laptops(id,laptop_id,device_registration_id,model,manufacturer,device_name,operating_system,active,last_seen_at)&limit=1`);
+    assignedDevice = assignments[0]?.laptop || null;
+    document.getElementById('endpointEmployee').textContent = employeeProfile.full_name || employeeRecord.user_id;
+    document.getElementById('endpointDevice').textContent = assignedDevice?.laptop_id || 'Not assigned';
+    document.getElementById('endpointModel').textContent = assignedDevice
+      ? [assignedDevice.manufacturer, assignedDevice.model].filter(Boolean).join(' ') || assignedDevice.device_name || assignedDevice.operating_system || '—'
+      : '—';
+    updateDeviceStatus();
+  } catch (error) {
+    document.getElementById('endpointDevice').textContent = 'Unavailable';
+    document.getElementById('endpointModel').textContent = '—';
+    document.getElementById('deviceConnectionStatus').textContent = 'Unavailable';
+    document.getElementById('deviceConnectionStatus').classList.add('is-offline');
+    document.getElementById('endpointStatus').textContent = 'Unavailable';
+    document.getElementById('endpointStatus').classList.add('is-offline');
+    console.error('Could not load assigned device details:', error);
+  }
+}
+
+function updateDeviceStatus() {
+  const connectionStatus = document.getElementById('deviceConnectionStatus');
+  const endpointStatus = document.getElementById('endpointStatus');
+  const lastSeen = assignedDevice?.last_seen_at ? new Date(assignedDevice.last_seen_at).getTime() : NaN;
+  const age = Date.now() - lastSeen;
+  const isOnline = Number.isFinite(lastSeen) && age >= 0 && age <= 3 * 60 * 1000;
+  connectionStatus.textContent = !assignedDevice ? 'Not assigned' : isOnline ? 'Online' : 'Offline';
+  connectionStatus.classList.toggle('is-offline', !isOnline);
+  endpointStatus.textContent = assignedDevice && assignedDevice.active !== false ? 'Active' : 'Inactive';
+  endpointStatus.classList.toggle('is-offline', !assignedDevice || assignedDevice.active === false);
+}
+
+function updateSyncStatus() {
+  const syncStatus = document.getElementById('syncStatus');
+  if (!lastPolicySyncAt) {
+    syncStatus.textContent = '—';
+    return;
+  }
+  const elapsedMinutes = Math.floor((Date.now() - lastPolicySyncAt) / 60000);
+  syncStatus.textContent = elapsedMinutes < 1 ? 'Now' : `${elapsedMinutes}m`;
 }
 
 function isRuleActiveNow(rule, now = new Date()) {
@@ -201,6 +234,8 @@ async function loadEmployeeBlockingPolicies() {
       }));
     const activeRules = applicableRules.filter((rule) => isRuleActiveNow(rule));
     document.getElementById('websiteStatus').textContent = String(activeRules.length);
+    lastPolicySyncAt = Date.now();
+    updateSyncStatus();
     document.getElementById('blockedList').innerHTML = activeRules.map((rule) => (
       `<li>${escapeHtml(rule.domain)} · ${escapeHtml(String(rule.start_time).slice(0, 5))}–${escapeHtml(String(rule.end_time).slice(0, 5))}</li>`
     )).join('');
@@ -210,6 +245,7 @@ async function loadEmployeeBlockingPolicies() {
     state.classList.remove('error-text');
   } catch (error) {
     document.getElementById('websiteStatus').textContent = 'Unavailable';
+    document.getElementById('syncStatus').textContent = 'Unavailable';
     document.getElementById('blockedList').innerHTML = '';
     state.textContent = `Could not load website policies: ${error.message}`;
     state.classList.add('error-text');
@@ -235,16 +271,19 @@ async function loadEmployeeUsageSummary() {
       `website_usage_logs?profile_id=eq.${encodeURIComponent(extensionSession.user.id)}&recorded_at=gte.${encodeURIComponent(start.toISOString())}&recorded_at=lt.${encodeURIComponent(end.toISOString())}&select=domain,visit_count,total_seconds,recorded_at&order=recorded_at.desc&limit=1000`,
     );
     const totalSeconds = logs.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0);
+    const totalVisits = logs.reduce((sum, row) => sum + (Number(row.visit_count) || 0), 0);
     const visitsByDomain = new Map();
     logs.forEach((row) => {
       if (row.domain) visitsByDomain.set(row.domain, (visitsByDomain.get(row.domain) || 0) + (Number(row.visit_count) || 0));
     });
     const mostVisited = [...visitsByDomain.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    document.getElementById('todayVisitCount').textContent = String(totalVisits);
     document.getElementById('todayUsage').textContent = logs.length ? formatUsageDuration(totalSeconds) : 'No data';
     document.getElementById('mostVisitedSite').textContent = mostVisited || '—';
     state.textContent = logs.length ? 'Based on today’s Supabase usage records.' : 'No website usage has been recorded for today.';
     state.classList.remove('error-text');
   } catch (error) {
+    document.getElementById('todayVisitCount').textContent = 'Unavailable';
     document.getElementById('todayUsage').textContent = 'Unavailable';
     document.getElementById('mostVisitedSite').textContent = '—';
     state.textContent = `Could not load usage summary: ${error.message}`;
@@ -253,7 +292,7 @@ async function loadEmployeeUsageSummary() {
 }
 
 async function loadEmployeeHomeData() {
-  await Promise.all([loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary()]);
+  await Promise.all([loadAssignedDevice(), loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary()]);
 }
 
 async function loadMyTickets() {
@@ -262,13 +301,17 @@ async function loadMyTickets() {
   state.textContent = 'Loading your tickets…';
   state.classList.remove('error-text');
   try {
-    const tickets = await restRequest(`tickets?profile_id=eq.${extensionSession.user.id}&select=id,ticket_number,subject,issue_category,status,priority,created_at,updated_at&order=updated_at.desc&limit=50`);
+    const tickets = await restRequest(`tickets?profile_id=eq.${extensionSession.user.id}&select=id,ticket_number,subject,issue_category,status,priority,created_at,updated_at&order=updated_at.desc&limit=1000`);
+    document.getElementById('openTicketCount').textContent = String(
+      tickets.filter((ticket) => !['Resolved', 'Closed'].includes(ticket.status)).length,
+    );
+    const visibleTickets = tickets.slice(0, 50);
     const unreadByTicket = new Map();
-    if (tickets.length) {
-      const unread = await restRequest(`ticket_messages?ticket_id=in.(${tickets.map((ticket) => ticket.id).join(',')})&sender_role=neq.Employee&is_read=eq.false&select=ticket_id`);
+    if (visibleTickets.length) {
+      const unread = await restRequest(`ticket_messages?ticket_id=in.(${visibleTickets.map((ticket) => ticket.id).join(',')})&sender_role=neq.Employee&is_read=eq.false&select=ticket_id`);
       unread.forEach((message) => unreadByTicket.set(message.ticket_id, (unreadByTicket.get(message.ticket_id) || 0) + 1));
     }
-    document.getElementById('myTicketsList').innerHTML = tickets.map((ticket) => `
+    document.getElementById('myTicketsList').innerHTML = visibleTickets.map((ticket) => `
       <li><button type="button" class="ticket-list-button" data-ticket-id="${escapeHtml(ticket.id)}">
         <span class="ticket-list-top"><strong>${escapeHtml(ticket.ticket_number)}</strong><span class="status-pill">${escapeHtml(ticket.status)}</span></span>
         <span>${escapeHtml(ticket.subject)}</span>
@@ -278,6 +321,7 @@ async function loadMyTickets() {
     state.textContent = tickets.length ? '' : 'You have not submitted any tickets yet.';
     state.classList.toggle('hidden', tickets.length > 0);
   } catch (error) {
+    document.getElementById('openTicketCount').textContent = 'Unavailable';
     state.textContent = `Unable to load tickets: ${error.message}`;
     state.classList.add('error-text');
     state.classList.remove('hidden');
@@ -608,6 +652,7 @@ async function initPopup() {
     const tab = event.target.closest('.extension-tab[data-view]');
     if (tab) switchExtensionView(tab.dataset.view);
   });
+  document.getElementById('createTicketBtn').addEventListener('click', () => switchExtensionView('reportView'));
 
   if (!isSupabaseConfigured()) {
     showLogin('Configure Supabase in extension/config.js to sign in and access your tickets.');

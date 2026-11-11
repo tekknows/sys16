@@ -66,7 +66,7 @@ async function syncBlockingRules() {
     .map((domain, index) => ({
       id: blockRuleIdStart + index,
       priority: 1,
-      action: { type: 'redirect', redirect: { extensionPath: '/blocked.html' } },
+      action: { type: 'redirect', redirect: { extensionPath: `/blocked.html?domain=${encodeURIComponent(domain)}` } },
       condition: { requestDomains: [domain], resourceTypes: ['main_frame'] },
     }));
   await chrome.declarativeNetRequest.updateDynamicRules({

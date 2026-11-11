@@ -30,8 +30,18 @@ body {
   font-family: Inter, 'Segoe UI', sans-serif;
 }
 
+html,
+body {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
+
 .popup-body {
-  padding: 18px;
+  padding: 12px;
 }
 
 .popup-header,
@@ -46,11 +56,150 @@ body {
 
 .popup-header {
   position: sticky;
-  top: -18px;
+  top: -12px;
   z-index: 3;
-  margin: -18px -18px 0;
-  padding: 18px;
+  margin: -12px -12px 0;
+  padding: 14px 12px;
   background: var(--bg);
+}
+
+.device-status-card {
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.device-status-card h2 {
+  margin: 10px 0 12px;
+  color: var(--text);
+  font-size: 1.08rem;
+}
+
+.device-status-badge,
+.endpoint-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: var(--surface-alt);
+  color: var(--success);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.device-status-badge.is-offline,
+.endpoint-status.is-offline {
+  background: var(--surface-alt);
+  color: var(--warning);
+}
+
+.create-ticket-btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 16px;
+  background: #d98250;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.create-ticket-btn:hover,
+.create-ticket-btn:focus-visible {
+  background: #e29363;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.metric-card {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 15px 16px;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--surface);
+}
+
+.metric-card > span {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric-card > strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1.65rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-card > small {
+  color: var(--text-soft);
+  font-size: 0.74rem;
+}
+
+.endpoint-card {
+  margin-top: 16px;
+  padding: 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.endpoint-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.endpoint-heading h2 {
+  font-size: 1rem;
+}
+
+.endpoint-status {
+  background: rgba(91, 156, 255, 0.16);
+  color: var(--accent);
+}
+
+.endpoint-details {
+  display: grid;
+  gap: 10px;
+}
+
+.endpoint-field {
+  display: grid;
+  gap: 5px;
+}
+
+.endpoint-field > span {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.endpoint-field > strong {
+  overflow-wrap: anywhere;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 h1, h2 {
