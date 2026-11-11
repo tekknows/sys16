@@ -203,10 +203,6 @@
                 <span>Laptop</span>
                 <select id="assignmentLaptop"><option value="">Select a laptop</option></select>
               </label>
-              <label>
-                <span>Assignment retention (days)</span>
-                <input id="assignmentRetentionDays" type="number" min="1" max="3650" value="30" required />
-              </label>
               <p class="span-2 panel-subtitle">Reassigning an employee or laptop preserves the previous assignment in the history.</p>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Assign laptop</button>
@@ -528,6 +524,7 @@
                     <label class="checkbox-row"><input name="keepMessagesIndefinitely" type="checkbox" /><span>Keep messages indefinitely</span></label>
                     <label class="checkbox-row"><input name="policySyncEnabled" type="checkbox" checked /><span>Policy sync enabled</span></label>
                     <label><span>Disposal laptop cleanup (days)</span><input name="disposalCleanupDays" type="number" min="1" max="3650" value="30" required /></label>
+                    <label><span>Assignment retention (days)</span><input name="assignmentRetentionDays" type="number" min="1" max="3650" value="30" required /></label>
                     <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save retention settings</button><button type="button" class="secondary-btn" id="cleanupDisposalBtn">Delete disposal laptops</button></div>
                     <p class="span-2 form-state hidden" id="retentionSettingsState" role="status"></p>
                   </form>
@@ -658,6 +655,19 @@
         <div class="card-header"><h2 id="activityLogsTitle">Recent activity logs</h2><button class="icon-btn" data-close-modal aria-label="Close logs">×</button></div>
         <div class="table-scroll"><table><thead><tr><th>Action</th><th>Module</th><th>When</th></tr></thead><tbody id="activityLogsTable"></tbody></table></div>
         <p class="form-state hidden" id="activityLogsState" role="status"></p>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="resetPasswordModal" role="dialog" aria-modal="true" aria-labelledby="resetPasswordTitle">
+      <section class="modal-card">
+        <div class="card-header"><h2 id="resetPasswordTitle">Reset employee password</h2><button class="icon-btn" data-close-modal aria-label="Close password reset">×</button></div>
+        <p id="resetPasswordEmployee" class="panel-subtitle"></p>
+        <form id="resetPasswordForm" class="form-grid compact">
+          <label><span>New password</span><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required /></label>
+          <label><span>Confirm password</span><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required /></label>
+          <div class="span-2 actions-row"><button type="submit" class="primary-btn">Reset password</button><button type="button" class="secondary-btn" data-close-modal>Cancel</button></div>
+          <p class="span-2 form-state hidden" id="resetPasswordState" role="status"></p>
+        </form>
       </section>
     </div>
 
