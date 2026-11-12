@@ -53,14 +53,29 @@ async function loadBlockingSchedules(session) {
     ].filter(Boolean);
     const assignmentRequest = assignmentFilters.length
       ? request(`blocking_schedule_assignments?or=(${assignmentFilters.join(',')})&select=id,schedule_id,employee_id,laptop_id`)
+        .catch((error) => {
+          logBlocking('Assignment retrieval failed; employee-specific schedules will not apply', {
+            error: error.message || String(error),
+          });
+          return null;
+        })
       : Promise.resolve([]);
     const [schedules, rules, assignments] = await Promise.all([
       request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on'),
-      request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id,start_time,end_time,days_of_week'),
+      request('website_blocking_rules?is_active=eq.true&select=domain,target_profile_id,start_time,end_time,days_of_week'),
       assignmentRequest,
     ]);
+    let linkedRules = [];
+    try {
+      linkedRules = await request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id');
+    } catch (error) {
+      logBlocking('schedule_id column unavailable; matching schedule names to rule domains', {
+        error: error.message || String(error),
+      });
+    }
+    const linkedRuleByDomain = new Map(linkedRules.map((rule) => [normalizeDomain(rule.domain), rule]));
     const scheduleMap = new Map(schedules.map((schedule) => [schedule.id, schedule]));
-    const assignedScheduleIds = new Set(assignments.map((assignment) => assignment.schedule_id));
+    const assignedScheduleIds = new Set((assignments || []).map((assignment) => assignment.schedule_id));
     const rulesByDomain = new Map();
     rules.forEach((rule) => {
       const domain = normalizeDomain(rule.domain);
@@ -68,15 +83,18 @@ async function loadBlockingSchedules(session) {
       rulesByDomain.get(domain).push(rule);
     });
     const policies = schedules.flatMap((schedule) => {
-      const linkedRules = rules.filter((rule) => rule.schedule_id === schedule.id);
-      const matchingRules = linkedRules.length
-        ? linkedRules
-        : (rulesByDomain.get(normalizeDomain(schedule.name)) || []);
+      const linkedScheduleRules = linkedRules.filter((rule) => rule.schedule_id === schedule.id);
+      const matchingRules = linkedScheduleRules.length
+        ? linkedScheduleRules
+        : (rulesByDomain.get(normalizeDomain(schedule.name)) || []).map((rule) => ({
+          ...rule,
+          schedule_id: linkedRuleByDomain.get(normalizeDomain(rule.domain))?.schedule_id || null,
+        }));
       return matchingRules
         .filter((rule) => {
           const scope = String(schedule.scope || '').toLowerCase();
           const isGlobal = !scope || scope === 'global' || scope === 'all';
-          return isGlobal || assignedScheduleIds.has(schedule.id);
+          return isGlobal || (assignments !== null && assignedScheduleIds.has(schedule.id));
         })
         .map((rule) => ({ ...schedule, ...rule, schedule_id: schedule.id }));
     });
@@ -87,7 +105,7 @@ async function loadBlockingSchedules(session) {
       assignedLaptopIds: laptopIds,
       globalSchedules: schedules.filter((schedule) => ['global', 'all', ''].includes(String(schedule.scope || '').toLowerCase())).length,
       employeeSchedules: schedules.filter((schedule) => !['global', 'all', ''].includes(String(schedule.scope || '').toLowerCase())).length,
-      assignments,
+      assignments: assignments || [],
       domains: policies.map((policy) => policy.domain),
     });
     return policies;

@@ -25,6 +25,7 @@ let deviceRegistrations = [];
 let connectionHistory = [];
 let selectedChangeRequest = null;
 let blockingScheduleSchemaReady = true;
+let blockingScheduleLinkReady = true;
 let blockingTargetSchemaReady = true;
 let ticketStatusCounts = {};
 let monitoringRefreshTimer = null;
@@ -608,12 +609,19 @@ async function loadBlockingPolicies(client) {
 
   const [scheduleResult, ruleResult, assignmentResult, employeeResult] = await Promise.all([
     client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by').order('created_at', { ascending: false }),
-    client.from('website_blocking_rules').select('id,domain,schedule_id,target_profile_id,is_active,created_by').order('created_at', { ascending: false }),
+    client.from('website_blocking_rules').select('id,domain,target_profile_id,is_active,created_by').order('created_at', { ascending: false }),
     client.from('blocking_schedule_assignments').select('schedule_id,employee_id,laptop_id'),
     client.from('employees').select('id,profile_id'),
   ]);
-  if (scheduleResult.error || ruleResult.error || assignmentResult.error || employeeResult.error || (ruleResult.data || []).some((row) => !('schedule_id' in row))) {
+  if (scheduleResult.error || ruleResult.error || assignmentResult.error || employeeResult.error) {
     return legacyQuery();
+  }
+  let linkedRuleResult = await client.from('website_blocking_rules')
+    .select('id,domain,schedule_id,target_profile_id,is_active,created_by')
+    .order('created_at', { ascending: false });
+  const scheduleLinkReady = !linkedRuleResult.error;
+  if (linkedRuleResult.error) {
+    linkedRuleResult = { data: [], error: null };
   }
   const schedules = new Map((scheduleResult.data || []).map((row) => [row.id, row]));
   const assignmentBySchedule = new Map();
@@ -628,7 +636,7 @@ async function loadBlockingPolicies(client) {
     rulesByDomain.get(domain).push(rule);
   });
   const data = [...schedules.values()].flatMap((schedule) => {
-    const linkedRules = (ruleResult.data || []).filter((rule) => rule.schedule_id === schedule.id);
+    const linkedRules = (linkedRuleResult.data || []).filter((rule) => rule.schedule_id === schedule.id);
     const matchingRules = linkedRules.length
       ? linkedRules
       : (rulesByDomain.get(normalizeBlockingDomain(schedule.name)) || []);
@@ -646,7 +654,7 @@ async function loadBlockingPolicies(client) {
       created_by: rule.created_by || schedule.created_by,
     }));
   });
-  return { canonical: true, data };
+  return { canonical: true, scheduleLink: scheduleLinkReady, data };
 }
 
 async function loadDashboardData() {
@@ -686,6 +694,7 @@ async function loadDashboardData() {
     deviceMonitoringSchemaReady = true;
     const policyResult = await loadBlockingPolicies(client);
     blockingScheduleSchemaReady = policyResult.canonical;
+    blockingScheduleLinkReady = policyResult.scheduleLink !== false;
     blockingTargetSchemaReady = true;
     const [employeeResult, profileResult, roleResult, , assignmentResult, requestResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
@@ -2085,7 +2094,7 @@ function setupDashboardInteractions() {
             if (scheduleQuery.error) throw scheduleQuery.error;
             scheduleId = scheduleQuery.data.id;
           }
-          ruleValues.schedule_id = scheduleId;
+          if (blockingScheduleLinkReady) ruleValues.schedule_id = scheduleId;
           const ruleQuery = ruleId
             ? await getSupabaseClient().from('website_blocking_rules').update(ruleValues).eq('id', ruleId)
             : await getSupabaseClient().from('website_blocking_rules').insert(ruleValues);
