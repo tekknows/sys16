@@ -69,7 +69,7 @@ async function syncBlockingRules() {
       id: blockRuleIdStart + index,
       priority: 1,
       action: { type: 'block' },
-      condition: { requestDomains: [domain], resourceTypes: ['main_frame'] },
+      condition: { urlFilter: `||${domain}^`, resourceTypes: ['main_frame'] },
     }));
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: managedRules.map((rule) => rule.id),
@@ -78,7 +78,7 @@ async function syncBlockingRules() {
   const normalizedDomains = [...activeDomains].sort();
   const previousDomains = stored['mindlock-last-blocking-domains'];
   const installedDomains = managedRules
-    .flatMap((rule) => rule.condition?.requestDomains || [])
+    .map((rule) => String(rule.condition?.urlFilter || '').replace(/^\|\|/, '').replace(/\^$/, ''))
     .sort();
   const policyChanged = JSON.stringify(normalizedDomains) !== JSON.stringify(previousDomains)
     || JSON.stringify(normalizedDomains) !== JSON.stringify(installedDomains);
@@ -97,6 +97,7 @@ async function syncBlockingRules() {
       .map((tab) => chrome.tabs.reload(tab.id).catch(() => undefined)));
   }
   await chrome.storage.local.set({ 'mindlock-last-blocking-domains': normalizedDomains });
+  return normalizedDomains;
 }
 
 const notifiedRepliesKey = 'mindlock-notified-replies';
@@ -117,6 +118,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[extensionSessionKey]) {
     syncBlockingRules().catch((error) => console.error('Unable to update website blocking rules:', error));
   }
+});
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'sync-blocking-rules') return false;
+  syncBlockingRules()
+    .then((domains) => sendResponse({ ok: true, domains }))
+    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+  return true;
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ticketCheckAlarm) checkForTicketReplies();

@@ -163,9 +163,15 @@ function isRuleActiveNow(rule, now = new Date()) {
   return start <= end ? time >= start && time <= end : time >= start || time <= end;
 }
 
+async function syncBlockingRulesInBackground() {
+  const result = await chrome.runtime.sendMessage({ type: 'sync-blocking-rules' });
+  if (!result?.ok) throw new Error(result?.error || 'The extension could not install the active blocking rules.');
+}
+
 async function loadEmployeeBlockingPolicies() {
   const state = document.getElementById('blockingPolicyState');
   try {
+    await syncBlockingRulesInBackground();
     let hasScheduleColumns = true;
     let hasTargetColumn = true;
     let rules;
