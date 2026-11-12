@@ -30,12 +30,21 @@ async function loadBlockingSchedules(session) {
   try {
     const employees = await request(`employees?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id&limit=1`);
     const employeeId = employees[0]?.id;
+    const laptopAssignments = employeeId
+      ? await request(`laptop_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&status=eq.Active&select=laptop_id`)
+      : [];
+    const laptopIds = laptopAssignments.map((assignment) => assignment.laptop_id).filter(Boolean);
+    const assignmentFilters = [
+      employeeId ? `employee_id.eq.${encodeURIComponent(employeeId)}` : null,
+      ...laptopIds.map((laptopId) => `laptop_id.eq.${encodeURIComponent(laptopId)}`),
+    ].filter(Boolean);
+    const assignmentQuery = assignmentFilters.length
+      ? `blocking_schedule_assignments?or=(${assignmentFilters.join(',')})&select=schedule_id`
+      : 'blocking_schedule_assignments?id=eq.00000000-0000-0000-0000-000000000000&select=schedule_id';
     const [schedules, rules, assignments] = await Promise.all([
       request('blocking_schedules?is_active=eq.true&select=id,scope,start_time,end_time,days_of_week,starts_on,expires_on'),
       request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id,start_time,end_time,days_of_week'),
-      employeeId
-        ? request(`blocking_schedule_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&select=schedule_id`)
-        : Promise.resolve([]),
+      request(assignmentQuery),
     ]);
     const scheduleMap = new Map(schedules.map((schedule) => [schedule.id, schedule]));
     const assignedScheduleIds = new Set(assignments.map((assignment) => assignment.schedule_id));
@@ -54,15 +63,22 @@ async function loadBlockingSchedules(session) {
 async function syncBlockingRules() {
   const cached = await chrome.storage.local.get(['mindlock-blocking-policies']);
   const session = await getValidExtensionSession();
-  let schedules = cached['mindlock-blocking-policies'] || [];
+  let schedules = [];
   if (session) {
     try {
       schedules = await loadBlockingSchedules(session);
       await chrome.storage.local.set({ 'mindlock-blocking-policies': schedules });
     } catch (error) {
+      schedules = cached['mindlock-blocking-policies'] || [];
       if (!schedules.length) throw new Error(`Could not synchronize website policies: ${error.message || error}`);
+      console.warn('Using cached website blocking policies after synchronization failure:', error);
     }
   }
+  console.info('Website blocking synchronization:', {
+    employeeId: session?.user?.id || null,
+    retrievedPolicyCount: schedules.length,
+    applicableScheduleCount: schedules.filter((rule) => isScheduleActive(rule)).length,
+  });
   const domains = schedules.filter((rule) => {
     if (session && rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
     return isScheduleActive(rule);
