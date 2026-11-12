@@ -169,6 +169,9 @@ function isRuleActiveNow(rule, now = new Date()) {
 async function syncBlockingRulesInBackground() {
   const result = await chrome.runtime.sendMessage({ type: 'sync-blocking-rules' });
   if (!result?.ok) throw new Error(result?.error || 'The extension could not install the active blocking rules.');
+  if (result.installedRuleCount !== result.domains.length) {
+    throw new Error(`Only ${result.installedRuleCount} of ${result.domains.length} active website rules were installed by Chrome.`);
+  }
 }
 
 async function loadEmployeeBlockingPolicies() {

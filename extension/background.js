@@ -80,10 +80,14 @@ async function syncBlockingRules() {
   const installedDomainsBeforeUpdate = managedRules
     .flatMap((rule) => rule.condition?.requestDomains || [])
     .sort();
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: managedRules.map((rule) => rule.id),
-    addRules,
-  });
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: managedRules.map((rule) => rule.id),
+      addRules,
+    });
+  } catch (error) {
+    throw new Error(`Chrome could not install website blocking rules: ${error.message || error}`);
+  }
   const installedRules = await chrome.declarativeNetRequest.getDynamicRules();
   const installedActiveDomains = installedRules
     .filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100)
@@ -108,7 +112,10 @@ async function syncBlockingRules() {
       })
       .map((tab) => chrome.tabs.reload(tab.id).catch(() => undefined)));
   }
-  return normalizedDomains;
+  return {
+    domains: normalizedDomains,
+    installedRuleCount: installedActiveDomains.length,
+  };
 }
 
 const notifiedRepliesKey = 'mindlock-notified-replies';
@@ -133,7 +140,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'sync-blocking-rules') return false;
   syncBlockingRules()
-    .then((domains) => sendResponse({ ok: true, domains }))
+    .then((result) => sendResponse({ ok: true, ...result }))
     .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
   return true;
 });
