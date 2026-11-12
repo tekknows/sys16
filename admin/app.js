@@ -44,6 +44,25 @@ function normalizeBlockingDomain(value) {
     .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
 }
 
+function isBlockingScheduleActiveNow(row, now = new Date()) {
+  const rawDays = Array.isArray(row.days_of_week) ? row.days_of_week : String(row.days_of_week || '').split(',');
+  const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3)).filter(Boolean);
+  const time = now.toTimeString().slice(0, 5);
+  const start = String(row.start_time || '00:00').slice(0, 5);
+  const end = String(row.end_time || '23:59').slice(0, 5);
+  const overnight = start > end;
+  const afterStart = time >= start;
+  const beforeEnd = time <= end;
+  if (overnight && !afterStart && !beforeEnd) return false;
+  if (!overnight && !(time >= start && time <= end)) return false;
+  const scheduleDate = new Date(now);
+  if (overnight && beforeEnd && !afterStart) scheduleDate.setDate(scheduleDate.getDate() - 1);
+  const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' });
+  if (!days.some((value) => value.toLowerCase() === day.toLowerCase())) return false;
+  const date = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
+  return (!row.starts_on || date >= row.starts_on) && (!row.expires_on || date <= row.expires_on);
+}
+
 function isSupabaseConfigured() {
   const config = window.MINDLOCK_CONFIG;
   return Boolean(config?.supabaseUrl && config?.supabaseAnonKey && window.supabase?.createClient);
@@ -416,12 +435,9 @@ function renderBlockingTable() {
         : 'Specific employee'
       : 'All employees';
     const now = new Date();
-    const day = now.toLocaleDateString('en-US', { weekday: 'short' });
-    const time = now.toTimeString().slice(0, 5);
     const start = String(row.start_time || '00:00').slice(0, 5);
     const end = String(row.end_time || '23:59').slice(0, 5);
-    const inTimeRange = start <= end ? time >= start && time <= end : time >= start || time <= end;
-    const status = !row.is_active ? 'Paused' : normalizeBlockingDays(row.days_of_week).includes(day) && inTimeRange ? 'Active' : 'Scheduled';
+    const status = !row.is_active ? 'Paused' : isBlockingScheduleActiveNow(row) ? 'Active' : 'Scheduled';
     return `
         <tr>
           <td>${escapeHtml(row.domain)}</td>

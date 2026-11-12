@@ -6,17 +6,22 @@ const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 0.5;
 
 function isScheduleActive(rule, now = new Date()) {
-  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
   const rawDays = Array.isArray(rule.days_of_week) ? rule.days_of_week : String(rule.days_of_week || '').split(',');
   const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3).toLowerCase()).filter(Boolean);
-  if (!days.includes(day)) return false;
-  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  if (rule.starts_on && date < rule.starts_on) return false;
-  if (rule.expires_on && date > rule.expires_on) return false;
   const current = now.toTimeString().slice(0, 5);
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
-  return start <= end ? current >= start && current <= end : current >= start || current <= end;
+  const overnight = start > end;
+  const afterStart = current >= start;
+  const beforeEnd = current <= end;
+  if (overnight && !afterStart && !beforeEnd) return false;
+  if (!overnight && !(current >= start && current <= end)) return false;
+  const scheduleDate = new Date(now);
+  if (overnight && beforeEnd && !afterStart) scheduleDate.setDate(scheduleDate.getDate() - 1);
+  const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  if (!days.includes(day)) return false;
+  const date = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
+  return (!rule.starts_on || date >= rule.starts_on) && (!rule.expires_on || date <= rule.expires_on);
 }
 
 function normalizeDomain(value) {
