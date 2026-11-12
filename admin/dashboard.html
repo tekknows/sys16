@@ -674,9 +674,12 @@
         <div class="card-header"><h2 id="resetPasswordTitle">Reset employee password</h2><button class="icon-btn" data-close-modal aria-label="Close password reset">×</button></div>
         <p id="resetPasswordEmployee" class="panel-subtitle"></p>
         <form id="resetPasswordForm" class="form-grid compact">
-          <label><span>New password</span><span class="password-input"><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required /><button type="button" class="eye-toggle" aria-label="Show new password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
-          <label><span>Confirm password</span><span class="password-input"><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required /><button type="button" class="eye-toggle" aria-label="Show confirm password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
-          <div class="span-2 input-action-row"><button type="button" class="secondary-btn" data-generate-reset-password>Generate password</button></div>
+          <label><span>New password</span><span class="password-input"><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required /></span></label>
+          <label><span>Confirm password</span><span class="password-input"><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required /></span></label>
+          <div class="span-2 actions-row reset-password-tools">
+            <button type="button" class="secondary-btn icon-action-btn" data-generate-reset-password aria-label="Generate password" title="Generate password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h3M20 17v3h-3M5.5 18.5 4 20m14.5-16L20 2M4 12a8 8 0 0 1 13.7-5.7L20 8M20 12a8 8 0 0 1-13.7 5.7L4 16"></path></svg></button>
+            <button type="button" class="secondary-btn icon-action-btn" id="toggleResetPasswordsBtn" aria-label="Show passwords" aria-pressed="false" title="Show passwords"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+          </div>
           <div class="span-2 actions-row"><button type="submit" class="primary-btn">Reset password</button><button type="button" class="secondary-btn" data-close-modal>Cancel</button></div>
           <p class="span-2 form-state hidden" id="resetPasswordState" role="status"></p>
         </form>

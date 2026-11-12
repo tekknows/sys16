@@ -3,6 +3,7 @@ importScripts('config.js');
 const blockRuleIdStart = 1001;
 const extensionSessionKey = 'mindlock-extension-session';
 const policySyncAlarm = 'mindlock-policy-sync';
+const policySyncPeriodMinutes = 1;
 
 async function syncBlockingRules() {
   const stored = await chrome.storage.local.get(['mindlock-blocking-enabled']);
@@ -81,11 +82,11 @@ const ticketCheckAlarm = 'mindlock-ticket-reply-check';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
-  chrome.alarms.create(policySyncAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
 });
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
-  chrome.alarms.create(policySyncAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
 });
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));

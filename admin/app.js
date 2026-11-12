@@ -1747,12 +1747,23 @@ function setupDashboardInteractions() {
     confirmPassword.value = password;
     newPassword.type = 'text';
     confirmPassword.type = 'text';
-    form.querySelectorAll('.eye-toggle').forEach((button) => {
-      button.setAttribute('aria-pressed', 'true');
-      button.setAttribute('aria-label', `Hide ${button.parentElement.querySelector('input').getAttribute('autocomplete').replace('-', ' ')} password`);
-    });
+    const visibilityButton = document.getElementById('toggleResetPasswordsBtn');
+    visibilityButton?.setAttribute('aria-pressed', 'true');
+    visibilityButton?.setAttribute('aria-label', 'Hide passwords');
+    visibilityButton?.setAttribute('title', 'Hide passwords');
     newPassword.focus();
     newPassword.select();
+  });
+  document.getElementById('toggleResetPasswordsBtn')?.addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    const form = document.getElementById('resetPasswordForm');
+    const visible = button.getAttribute('aria-pressed') !== 'true';
+    form?.querySelectorAll('input[name="newPassword"], input[name="confirmPassword"]').forEach((input) => {
+      input.type = visible ? 'text' : 'password';
+    });
+    button.setAttribute('aria-pressed', String(visible));
+    button.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} passwords`);
+    button.setAttribute('title', `${visible ? 'Hide' : 'Show'} passwords`);
   });
   document.getElementById('changePasswordForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2140,8 +2151,14 @@ function setupDashboardInteractions() {
     form.dataset.employeeRecordId = employee.user_id;
     document.getElementById('resetPasswordEmployee').textContent = `Set a new password for ${employee.name}.`;
     form.reset();
+    form.querySelectorAll('input[name="newPassword"], input[name="confirmPassword"]').forEach((input) => {
+      input.type = 'password';
+    });
     state.textContent = '';
     state.classList.add('hidden');
+    document.getElementById('toggleResetPasswordsBtn')?.setAttribute('aria-pressed', 'false');
+    document.getElementById('toggleResetPasswordsBtn')?.setAttribute('aria-label', 'Show passwords');
+    document.getElementById('toggleResetPasswordsBtn')?.setAttribute('title', 'Show passwords');
     modal.classList.remove('hidden');
     form.elements.newPassword.focus();
   });
