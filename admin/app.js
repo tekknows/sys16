@@ -45,9 +45,11 @@ function normalizeBlockingDomain(value) {
 }
 
 function isBlockingScheduleActiveNow(row, now = new Date()) {
+  const timezone = row.timezone || 'Asia/Manila';
+  const parts = getBlockingZonedClock(now, timezone);
   const rawDays = Array.isArray(row.days_of_week) ? row.days_of_week : String(row.days_of_week || '').split(',');
   const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3)).filter(Boolean);
-  const time = now.toTimeString().slice(0, 5);
+  const time = parts.time;
   const start = String(row.start_time || '00:00').slice(0, 5);
   const end = String(row.end_time || '23:59').slice(0, 5);
   const overnight = start > end;
@@ -55,12 +57,33 @@ function isBlockingScheduleActiveNow(row, now = new Date()) {
   const beforeEnd = time <= end;
   if (overnight && !afterStart && !beforeEnd) return false;
   if (!overnight && !(time >= start && time <= end)) return false;
-  const scheduleDate = new Date(now);
-  if (overnight && beforeEnd && !afterStart) scheduleDate.setDate(scheduleDate.getDate() - 1);
-  const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' });
+  const scheduleDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  if (overnight && beforeEnd && !afterStart) scheduleDate.setUTCDate(scheduleDate.getUTCDate() - 1);
+  const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
   if (!days.some((value) => value.toLowerCase() === day.toLowerCase())) return false;
   const date = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
   return (!row.starts_on || date >= row.starts_on) && (!row.expires_on || date <= row.expires_on);
+}
+
+function getBlockingZonedClock(date, timezone) {
+  const values = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).reduce((result, part) => {
+    if (part.type !== 'literal') result[part.type] = part.value;
+    return result;
+  }, {});
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    time: `${values.hour}:${values.minute}`,
+  };
 }
 
 function isSupabaseConfigured() {
@@ -624,11 +647,18 @@ async function loadBlockingPolicies(client) {
   };
 
   const [scheduleResult, ruleResult, assignmentResult, employeeResult] = await Promise.all([
-    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by').order('created_at', { ascending: false }),
+    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,timezone').order('created_at', { ascending: false }),
     client.from('website_blocking_rules').select('id,domain,target_profile_id,is_active,created_by').order('created_at', { ascending: false }),
     client.from('blocking_schedule_assignments').select('schedule_id,employee_id,laptop_id'),
     client.from('employees').select('id,profile_id'),
   ]);
+  if (scheduleResult.error && /timezone/i.test(scheduleResult.error.message)) {
+    const fallbackScheduleResult = await client.from('blocking_schedules')
+      .select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by')
+      .order('created_at', { ascending: false });
+    scheduleResult.data = (fallbackScheduleResult.data || []).map((schedule) => ({ ...schedule, timezone: 'Asia/Manila' }));
+    scheduleResult.error = fallbackScheduleResult.error;
+  }
   if (scheduleResult.error || ruleResult.error || assignmentResult.error || employeeResult.error) {
     return legacyQuery();
   }
@@ -665,6 +695,7 @@ async function loadBlockingPolicies(client) {
       days_of_week: normalizeBlockingDays(schedule.days_of_week),
       starts_on: schedule.starts_on || null,
       expires_on: schedule.expires_on || null,
+      timezone: schedule.timezone || 'Asia/Manila',
       target_profile_id: rule.target_profile_id || employeeProfiles.get(assignment?.employee_id) || null,
       is_active: rule.is_active && schedule.is_active !== false,
       created_by: rule.created_by || schedule.created_by,
@@ -2093,6 +2124,7 @@ function setupDashboardInteractions() {
         days_of_week: days,
         starts_on: null,
         expires_on: null,
+        timezone: formData.get('timezone') || 'Asia/Manila',
         is_active: priorRule?.is_active ?? true,
         created_by: adminUser.id,
       };
@@ -2103,10 +2135,18 @@ function setupDashboardInteractions() {
         if (blockingScheduleSchemaReady) {
           let scheduleId = priorRule?.schedule_id;
           if (scheduleId) {
-            const scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(scheduleValues).eq('id', scheduleId);
+            let scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(scheduleValues).eq('id', scheduleId);
+            if (scheduleQuery.error && /timezone/i.test(scheduleQuery.error.message)) {
+              const { timezone, ...legacyScheduleValues } = scheduleValues;
+              scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(legacyScheduleValues).eq('id', scheduleId);
+            }
             if (scheduleQuery.error) throw scheduleQuery.error;
           } else {
-            const scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(scheduleValues).select('id').single();
+            let scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(scheduleValues).select('id').single();
+            if (scheduleQuery.error && /timezone/i.test(scheduleQuery.error.message)) {
+              const { timezone, ...legacyScheduleValues } = scheduleValues;
+              scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(legacyScheduleValues).select('id').single();
+            }
             if (scheduleQuery.error) throw scheduleQuery.error;
             scheduleId = scheduleQuery.data.id;
           }
@@ -2168,6 +2208,7 @@ function setupDashboardInteractions() {
     form.elements.namedItem('targetProfileId').value = rule.target_profile_id || '';
     form.elements.namedItem('startTime').value = String(rule.start_time || '00:00').slice(0, 5);
     form.elements.namedItem('endTime').value = String(rule.end_time || '23:59').slice(0, 5);
+    if (form.elements.namedItem('timezone')) form.elements.namedItem('timezone').value = rule.timezone || 'Asia/Manila';
     form.querySelectorAll('input[name="days"]').forEach((input) => {
       input.checked = (rule.days_of_week || []).includes(input.value);
     });

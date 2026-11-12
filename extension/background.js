@@ -6,9 +6,11 @@ const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 0.5;
 
 function isScheduleActive(rule, now = new Date()) {
+  const timezone = rule.timezone || 'Asia/Manila';
+  const parts = getZonedClock(now, timezone);
   const rawDays = Array.isArray(rule.days_of_week) ? rule.days_of_week : String(rule.days_of_week || '').split(',');
   const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3).toLowerCase()).filter(Boolean);
-  const current = now.toTimeString().slice(0, 5);
+  const current = parts.time;
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
   const overnight = start > end;
@@ -16,14 +18,34 @@ function isScheduleActive(rule, now = new Date()) {
   const beforeEnd = current <= end;
   if (overnight && !afterStart && !beforeEnd) return false;
   if (!overnight && !(current >= start && current <= end)) return false;
-  const scheduleDate = new Date(now);
-  if (overnight && beforeEnd && !afterStart) scheduleDate.setDate(scheduleDate.getDate() - 1);
-  const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const scheduleDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  if (overnight && beforeEnd && !afterStart) scheduleDate.setUTCDate(scheduleDate.getUTCDate() - 1);
+  const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toLowerCase();
   if (!days.includes(day)) return false;
   const date = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
   return (!rule.starts_on || date >= rule.starts_on) && (!rule.expires_on || date <= rule.expires_on);
 }
 
+function getZonedClock(date, timezone) {
+  const values = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).reduce((result, part) => {
+    if (part.type !== 'literal') result[part.type] = part.value;
+    return result;
+  }, {});
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    time: `${values.hour}:${values.minute}`,
+  };
+}
 function normalizeDomain(value) {
   return String(value || '')
     .trim()
@@ -66,7 +88,8 @@ async function loadBlockingSchedules(session) {
         })
       : Promise.resolve([]);
     const [schedules, rules, assignments] = await Promise.all([
-      request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on'),
+      request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,timezone')
+        .catch(() => request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on')),
       request('website_blocking_rules?is_active=eq.true&select=domain,target_profile_id,start_time,end_time,days_of_week'),
       assignmentRequest,
     ]);

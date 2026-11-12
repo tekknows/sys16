@@ -155,9 +155,11 @@ async function loadCurrentEmployee() {
 }
 
 function isRuleActiveNow(rule, now = new Date()) {
+  const timezone = rule.timezone || 'Asia/Manila';
+  const parts = getZonedClock(now, timezone);
   const rawDays = Array.isArray(rule.days_of_week) ? rule.days_of_week : String(rule.days_of_week || '').split(',');
   const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3).toLowerCase()).filter(Boolean);
-  const time = now.toTimeString().slice(0, 5);
+  const time = parts.time;
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
   const overnight = start > end;
@@ -165,12 +167,33 @@ function isRuleActiveNow(rule, now = new Date()) {
   const beforeEnd = time <= end;
   if (overnight && !afterStart && !beforeEnd) return false;
   if (!overnight && !(time >= start && time <= end)) return false;
-  const scheduleDate = new Date(now);
-  if (overnight && beforeEnd && !afterStart) scheduleDate.setDate(scheduleDate.getDate() - 1);
-  const scheduleDay = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const scheduleDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  if (overnight && beforeEnd && !afterStart) scheduleDate.setUTCDate(scheduleDate.getUTCDate() - 1);
+  const scheduleDay = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toLowerCase();
   if (!days.includes(scheduleDay)) return false;
   const scheduleDateValue = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
   return (!rule.starts_on || scheduleDateValue >= rule.starts_on) && (!rule.expires_on || scheduleDateValue <= rule.expires_on);
+}
+
+function getZonedClock(date, timezone) {
+  const values = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).reduce((result, part) => {
+    if (part.type !== 'literal') result[part.type] = part.value;
+    return result;
+  }, {});
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    time: `${values.hour}:${values.minute}`,
+  };
 }
 
 async function syncBlockingRulesInBackground() {

@@ -39,6 +39,7 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Run `supabase/migrations/007_device_registration_monitoring.sql` after migration 006.
 - Run `supabase/migrations/008_settings_retention_and_assignment.sql` after migration 007.
 - Run `supabase/migrations/009_blocking_policy_relationship.sql` after migration 008 to link blocked domains to their schedules and enable schedule assignment policies.
+- Run `supabase/migrations/010_blocking_schedule_metadata.sql` after migration 009 to add schedule descriptions and explicit timezones. Existing schedules default to `Asia/Manila`.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js`, the extension, or the Windows agent.
 - Deploy from the project root with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt`. The registration endpoint checks the admin JWT itself; the heartbeat endpoint authenticates the device credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.
