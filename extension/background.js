@@ -87,12 +87,20 @@ async function loadBlockingSchedules(session) {
           return null;
         })
       : Promise.resolve([]);
-    const [schedules, rules, assignments] = await Promise.all([
+    const [schedules, assignments] = await Promise.all([
       request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,timezone')
         .catch(() => request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on')),
-      request('website_blocking_rules?is_active=eq.true&select=domain,target_profile_id,start_time,end_time,days_of_week'),
       assignmentRequest,
     ]);
+    let rules = [];
+    try {
+      rules = await request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id,start_time,end_time,days_of_week');
+    } catch (error) {
+      logBlocking('Optional blocking-rule columns unavailable; retrying with required domain column', {
+        error: error.message || String(error),
+      });
+      rules = await request('website_blocking_rules?is_active=eq.true&select=domain');
+    }
     let linkedRules = [];
     try {
       linkedRules = await request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id');
@@ -272,6 +280,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'sync-blocking-rules') return false;
+  if (!message.session?.access_token || !message.session?.user?.id) {
+    sendResponse({ ok: false, error: 'The employee session is missing. Sign in again before synchronizing blocking policies.' });
+    return false;
+  }
   syncBlockingRules(message.session || null)
     .then((result) => sendResponse({ ok: true, ...result }))
     .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
