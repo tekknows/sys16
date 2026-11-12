@@ -75,8 +75,11 @@ async function syncBlockingRules() {
       id: blockRuleIdStart + index,
       priority: 1,
       action: { type: 'block' },
-      condition: { urlFilter: `||${domain}^`, resourceTypes: ['main_frame'] },
+      condition: { requestDomains: [domain], resourceTypes: ['main_frame'] },
     }));
+  const installedDomainsBeforeUpdate = managedRules
+    .flatMap((rule) => rule.condition?.requestDomains || [])
+    .sort();
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: managedRules.map((rule) => rule.id),
     addRules,
@@ -84,20 +87,21 @@ async function syncBlockingRules() {
   const installedRules = await chrome.declarativeNetRequest.getDynamicRules();
   const installedActiveDomains = installedRules
     .filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100)
-    .map((rule) => String(rule.condition?.urlFilter || '').replace(/^\|\|/, '').replace(/\^$/, ''))
+    .flatMap((rule) => rule.condition?.requestDomains || [])
     .sort();
   if (JSON.stringify(installedActiveDomains) !== JSON.stringify([...activeDomains].sort())) {
     throw new Error('The browser did not install the active website blocking rules. Reload the extension and try again.');
   }
   const normalizedDomains = [...activeDomains].sort();
-  if (normalizedDomains.length) {
+  const newlyActiveDomains = normalizedDomains.filter((domain) => !installedDomainsBeforeUpdate.includes(domain));
+  if (newlyActiveDomains.length) {
     const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
     await Promise.all(tabs
       .filter((tab) => {
         if (!tab.id || !tab.url) return false;
         try {
           const hostname = new URL(tab.url).hostname.toLowerCase().replace(/^www\./, '');
-          return normalizedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+          return newlyActiveDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
         } catch {
           return false;
         }
