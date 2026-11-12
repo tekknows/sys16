@@ -7,61 +7,64 @@ const policySyncPeriodMinutes = 0.5;
 
 function isScheduleActive(rule, now = new Date()) {
   const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-  const days = Array.isArray(rule.days_of_week)
-    ? rule.days_of_week.map((value) => String(value).slice(0, 3).toLowerCase())
-    : [];
+  const rawDays = Array.isArray(rule.days_of_week) ? rule.days_of_week : String(rule.days_of_week || '').split(',');
+  const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3).toLowerCase()).filter(Boolean);
   if (!days.includes(day)) return false;
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (rule.starts_on && date < rule.starts_on) return false;
+  if (rule.expires_on && date > rule.expires_on) return false;
   const current = now.toTimeString().slice(0, 5);
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
   return start <= end ? current >= start && current <= end : current >= start || current <= end;
 }
 
+async function loadBlockingSchedules(session) {
+  const config = globalThis.MINDLOCK_CONFIG;
+  const headers = { apikey: config.supabaseAnonKey, Authorization: `******` };
+  const request = async (path) => {
+    const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/${path}`, { headers });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  };
+  try {
+    const employees = await request(`employees?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id&limit=1`);
+    const employeeId = employees[0]?.id;
+    const [schedules, rules, assignments] = await Promise.all([
+      request('blocking_schedules?is_active=eq.true&select=id,scope,start_time,end_time,days_of_week,starts_on,expires_on'),
+      request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id,start_time,end_time,days_of_week'),
+      employeeId
+        ? request(`blocking_schedule_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&select=schedule_id`)
+        : Promise.resolve([]),
+    ]);
+    const scheduleMap = new Map(schedules.map((schedule) => [schedule.id, schedule]));
+    const assignedScheduleIds = new Set(assignments.map((assignment) => assignment.schedule_id));
+    return rules
+      .map((rule) => ({ ...scheduleMap.get(rule.schedule_id), ...rule }))
+      .filter((rule) => (!rule.schedule_id || !rule.scope
+        || ['global', 'all'].includes(String(rule.scope).toLowerCase())
+        || assignedScheduleIds.has(rule.schedule_id))
+        && (!rule.target_profile_id || rule.target_profile_id === session.user.id));
+  } catch (error) {
+    const legacy = await request('website_blocking_rules?is_active=eq.true&select=domain,start_time,end_time,days_of_week,target_profile_id');
+    return legacy.filter((rule) => !rule.target_profile_id || rule.target_profile_id === session.user.id);
+  }
+}
+
 async function syncBlockingRules() {
+  const cached = await chrome.storage.local.get(['mindlock-blocking-policies']);
   const session = await getValidExtensionSession();
-  let schedules = [];
+  let schedules = cached['mindlock-blocking-policies'] || [];
   if (session) {
-    const config = globalThis.MINDLOCK_CONFIG;
-    let hasScheduleColumns = true;
-    let hasTargetColumn = true;
-    let response;
-    while (true) {
-      const columns = [
-        'domain',
-        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
-        ...(hasTargetColumn ? ['target_profile_id'] : []),
-      ];
-      response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_blocking_rules?is_active=eq.true&select=${columns.join(',')}`, {
-        headers: {
-          apikey: config.supabaseAnonKey,
-          Authorization: `******`,
-        },
-      });
-      if (response.ok) break;
-      const errorText = await response.text();
-      if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(errorText)) {
-        hasScheduleColumns = false;
-        continue;
-      }
-      if (hasTargetColumn && /target_profile_id/i.test(errorText)) {
-        hasTargetColumn = false;
-        continue;
-      }
-      throw new Error(`Could not load website policies (${response.status}): ${errorText}`);
+    try {
+      schedules = await loadBlockingSchedules(session);
+      await chrome.storage.local.set({ 'mindlock-blocking-policies': schedules });
+    } catch (error) {
+      if (!schedules.length) throw new Error(`Could not synchronize website policies: ${error.message || error}`);
     }
-    schedules = await response.json();
-    if (!hasScheduleColumns) {
-      schedules = schedules.map((rule) => ({
-        ...rule,
-        start_time: '00:00',
-        end_time: '23:59',
-        days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      }));
-    }
-    if (!hasTargetColumn) schedules = schedules.map((rule) => ({ ...rule, target_profile_id: null }));
   }
   const domains = schedules.filter((rule) => {
-    if (!session || (rule.target_profile_id && rule.target_profile_id !== session.user.id)) return false;
+    if (session && rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
     return isScheduleActive(rule);
   }).map((rule) => String(rule.domain || '').trim().toLowerCase().replace(/^www\./, ''));
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
@@ -115,6 +118,7 @@ async function syncBlockingRules() {
   return {
     domains: normalizedDomains,
     installedRuleCount: installedActiveDomains.length,
+    activePolicies: schedules.filter((rule) => isScheduleActive(rule)),
   };
 }
 

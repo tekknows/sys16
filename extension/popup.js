@@ -172,46 +172,14 @@ async function syncBlockingRulesInBackground() {
   if (result.installedRuleCount !== result.domains.length) {
     throw new Error(`Only ${result.installedRuleCount} of ${result.domains.length} active website rules were installed by Chrome.`);
   }
+  return result;
 }
 
 async function loadEmployeeBlockingPolicies() {
   const state = document.getElementById('blockingPolicyState');
   try {
-    await syncBlockingRulesInBackground();
-    let hasScheduleColumns = true;
-    let hasTargetColumn = true;
-    let rules;
-    while (true) {
-      const columns = [
-        'domain',
-        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
-        ...(hasTargetColumn ? ['target_profile_id'] : []),
-      ];
-      const query = `website_blocking_rules?is_active=eq.true&select=${columns.join(',')}`;
-      try {
-        rules = await restRequest(query);
-        break;
-      } catch (error) {
-        if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(error.message)) {
-          hasScheduleColumns = false;
-          continue;
-        }
-        if (hasTargetColumn && /target_profile_id/i.test(error.message)) {
-          hasTargetColumn = false;
-          continue;
-        }
-        throw error;
-      }
-    }
-    const applicableRules = rules
-      .filter((rule) => !rule.target_profile_id || rule.target_profile_id === extensionSession.user.id)
-      .map((rule) => ({
-        ...rule,
-        start_time: rule.start_time || '00:00',
-        end_time: rule.end_time || '23:59',
-        days_of_week: rule.days_of_week || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      }));
-    const activeRules = applicableRules.filter((rule) => isRuleActiveNow(rule));
+    const syncResult = await syncBlockingRulesInBackground();
+    const activeRules = syncResult.activePolicies || [];
     document.getElementById('websiteStatus').textContent = String(activeRules.length);
     document.getElementById('blockedList').innerHTML = activeRules.map((rule) => (
       `<li>${escapeHtml(rule.domain)} · ${escapeHtml(String(rule.start_time).slice(0, 5))}–${escapeHtml(String(rule.end_time).slice(0, 5))}</li>`

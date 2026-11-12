@@ -31,6 +31,13 @@ let monitoringRefreshTimer = null;
 let deviceMonitoringSchemaReady = false;
 let systemSettings = {};
 
+function normalizeBlockingDays(value) {
+  const values = Array.isArray(value) ? value : String(value || '').split(/[,\s]+/);
+  return values.flatMap((day) => String(day).split(/[,\s]+/))
+    .map((day) => day.trim().slice(0, 3))
+    .filter(Boolean);
+}
+
 function isSupabaseConfigured() {
   const config = window.MINDLOCK_CONFIG;
   return Boolean(config?.supabaseUrl && config?.supabaseAnonKey && window.supabase?.createClient);
@@ -393,7 +400,7 @@ function renderBlockingTable() {
   const table = document.getElementById('blockingTable');
   if (!table) return;
   table.innerHTML = blockingRules.length ? blockingRules.map((row) => {
-    const days = (row.days_of_week || []).join(', ') || 'Every day';
+    const days = normalizeBlockingDays(row.days_of_week).join(', ') || 'Every day';
     const targetEmployee = row.target_profile_id
       ? directoryEmployees.find((employee) => employee.profile_id === row.target_profile_id)
       : null;
@@ -408,7 +415,7 @@ function renderBlockingTable() {
     const start = String(row.start_time || '00:00').slice(0, 5);
     const end = String(row.end_time || '23:59').slice(0, 5);
     const inTimeRange = start <= end ? time >= start && time <= end : time >= start || time <= end;
-    const status = !row.is_active ? 'Paused' : (row.days_of_week || []).includes(day) && inTimeRange ? 'Active' : 'Scheduled';
+    const status = !row.is_active ? 'Paused' : normalizeBlockingDays(row.days_of_week).includes(day) && inTimeRange ? 'Active' : 'Scheduled';
     return `
         <tr>
           <td>${escapeHtml(row.domain)}</td>
@@ -554,6 +561,82 @@ function setDashboardState(message, isError = false) {
   if (message && !/^Loading\b/.test(message)) showToast(message, isError);
 }
 
+async function loadBlockingPolicies(client) {
+  const legacyQuery = async () => {
+    let hasScheduleColumns = true;
+    let hasTargetColumn = true;
+    let result;
+    while (true) {
+      const columns = [
+        'id',
+        'domain',
+        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
+        ...(hasTargetColumn ? ['target_profile_id'] : []),
+        'is_active',
+        'created_by',
+      ];
+      result = await client.from('website_blocking_rules').select(columns.join(',')).order('created_at', { ascending: false });
+      if (!result.error) break;
+      if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(result.error.message)) {
+        hasScheduleColumns = false;
+        continue;
+      }
+      if (hasTargetColumn && /target_profile_id/i.test(result.error.message)) {
+        hasTargetColumn = false;
+        continue;
+      }
+      throw result.error;
+    }
+    return {
+      data: (result.data || []).map((row) => ({
+        ...row,
+        start_time: row.start_time || '00:00',
+        end_time: row.end_time || '23:59',
+        days_of_week: normalizeBlockingDays(row.days_of_week),
+        starts_on: null,
+        expires_on: null,
+        schedule_id: null,
+      })),
+      canonical: false,
+    };
+  };
+
+  const [scheduleResult, ruleResult, assignmentResult, employeeResult] = await Promise.all([
+    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by').order('created_at', { ascending: false }),
+    client.from('website_blocking_rules').select('id,domain,schedule_id,target_profile_id,is_active,created_by').order('created_at', { ascending: false }),
+    client.from('blocking_schedule_assignments').select('schedule_id,employee_id,laptop_id'),
+    client.from('employees').select('id,profile_id'),
+  ]);
+  if (scheduleResult.error || ruleResult.error || assignmentResult.error || employeeResult.error || (ruleResult.data || []).some((row) => !('schedule_id' in row))) {
+    return legacyQuery();
+  }
+  const schedules = new Map((scheduleResult.data || []).map((row) => [row.id, row]));
+  const assignmentBySchedule = new Map();
+  const employeeProfiles = new Map((employeeResult.data || []).map((employee) => [employee.id, employee.profile_id]));
+  (assignmentResult.data || []).forEach((assignment) => {
+    if (!assignmentBySchedule.has(assignment.schedule_id)) assignmentBySchedule.set(assignment.schedule_id, assignment);
+  });
+  return {
+    canonical: true,
+    data: (ruleResult.data || []).map((rule) => {
+      const schedule = schedules.get(rule.schedule_id) || {};
+      const assignment = assignmentBySchedule.get(rule.schedule_id);
+      return {
+        ...rule,
+        schedule_id: rule.schedule_id,
+        start_time: schedule.start_time || '00:00',
+        end_time: schedule.end_time || '23:59',
+        days_of_week: normalizeBlockingDays(schedule.days_of_week),
+        starts_on: schedule.starts_on || null,
+        expires_on: schedule.expires_on || null,
+        target_profile_id: rule.target_profile_id || employeeProfiles.get(assignment?.employee_id) || null,
+        is_active: rule.is_active && schedule.is_active !== false,
+        created_by: rule.created_by || schedule.created_by,
+      };
+    }),
+  };
+}
+
 async function loadDashboardData() {
   const client = getSupabaseClient();
   if (!client || !adminUser) return;
@@ -589,47 +672,9 @@ async function loadDashboardData() {
     if (failed?.error) throw failed.error;
     if (laptopResult.error) throw laptopResult.error;
     deviceMonitoringSchemaReady = true;
-    let hasScheduleColumns = true;
-    let hasTargetColumn = true;
-    blockingScheduleSchemaReady = true;
+    const policyResult = await loadBlockingPolicies(client);
+    blockingScheduleSchemaReady = policyResult.canonical;
     blockingTargetSchemaReady = true;
-    let ruleResult;
-    while (true) {
-      const columns = [
-        'id',
-        'domain',
-        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
-        ...(hasTargetColumn ? ['target_profile_id'] : []),
-        'is_active',
-      ];
-      ruleResult = await client.from('website_blocking_rules')
-        .select(columns.join(','))
-        .order('created_at', { ascending: false });
-      if (!ruleResult.error) break;
-      const message = ruleResult.error.message;
-      if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(message)) {
-        hasScheduleColumns = false;
-        blockingScheduleSchemaReady = false;
-        continue;
-      }
-      if (hasTargetColumn && /target_profile_id/i.test(message)) {
-        hasTargetColumn = false;
-        blockingTargetSchemaReady = false;
-        continue;
-      }
-      throw ruleResult.error;
-    }
-    if (!hasScheduleColumns) {
-      ruleResult.data = (ruleResult.data || []).map((rule) => ({
-        ...rule,
-        start_time: '00:00',
-        end_time: '23:59',
-        days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      }));
-    }
-    if (!hasTargetColumn) {
-      ruleResult.data = (ruleResult.data || []).map((rule) => ({ ...rule, target_profile_id: null }));
-    }
     const [employeeResult, profileResult, roleResult, , assignmentResult, requestResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
     const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
@@ -675,7 +720,7 @@ async function loadDashboardData() {
     deviceRegistrations = registrationResult.data || [];
     connectionHistory = historyResult.data || [];
     renderConnectionFilterOptions();
-    blockingRules = ruleResult.data || [];
+    blockingRules = policyResult.data || [];
     const requestProfiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile.full_name]));
     changeRequests = (requestResult.data || []).map((request) => ({
       ...request,
@@ -1978,10 +2023,6 @@ function setupDashboardInteractions() {
     document.getElementById('cancelRuleEditBtn')?.addEventListener('click', resetRuleForm);
     scheduleForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!blockingScheduleSchemaReady) {
-        setDashboardState('Cannot save schedule times yet. Run migration 004_admin_dashboard_workflows.sql in Supabase first.', true);
-        return;
-      }
       const formData = new FormData(scheduleForm);
       const domain = String(formData.get('domain') || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
       const days = formData.getAll('days');
@@ -2002,22 +2043,65 @@ function setupDashboardInteractions() {
         setDashboardState('Specific employee schedules require migration 006_blocking_rule_employee_targets.sql.', true);
         return;
       }
-      const values = {
+      const ruleValues = {
         domain,
-        start_time: formData.get('startTime'),
-        end_time: formData.get('endTime'),
-        days_of_week: days,
         is_active: priorRule?.is_active ?? true,
         created_by: adminUser.id,
       };
-      if (blockingTargetSchemaReady) values.target_profile_id = targetProfileId || null;
+      const scheduleValues = {
+        name: domain,
+        scope: targetProfileId ? 'Employee' : 'Global',
+        start_time: formData.get('startTime'),
+        end_time: formData.get('endTime'),
+        days_of_week: days,
+        starts_on: null,
+        expires_on: null,
+        is_active: priorRule?.is_active ?? true,
+        created_by: adminUser.id,
+      };
+      if (blockingTargetSchemaReady) ruleValues.target_profile_id = targetProfileId || null;
       const submit = scheduleForm.querySelector('button[type="submit"]');
       submit.disabled = true;
       try {
-        const query = ruleId
-          ? await getSupabaseClient().from('website_blocking_rules').update(values).eq('id', ruleId)
-          : await getSupabaseClient().from('website_blocking_rules').insert(values);
-        if (query.error) throw query.error;
+        if (blockingScheduleSchemaReady) {
+          let scheduleId = priorRule?.schedule_id;
+          if (scheduleId) {
+            const scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(scheduleValues).eq('id', scheduleId);
+            if (scheduleQuery.error) throw scheduleQuery.error;
+          } else {
+            const scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(scheduleValues).select('id').single();
+            if (scheduleQuery.error) throw scheduleQuery.error;
+            scheduleId = scheduleQuery.data.id;
+          }
+          ruleValues.schedule_id = scheduleId;
+          const ruleQuery = ruleId
+            ? await getSupabaseClient().from('website_blocking_rules').update(ruleValues).eq('id', ruleId)
+            : await getSupabaseClient().from('website_blocking_rules').insert(ruleValues);
+          if (ruleQuery.error) throw ruleQuery.error;
+          if (scheduleId) {
+            const clearAssignments = await getSupabaseClient().from('blocking_schedule_assignments').delete().eq('schedule_id', scheduleId);
+            if (clearAssignments.error) throw clearAssignments.error;
+            if (targetProfileId) {
+              const assignmentQuery = await getSupabaseClient().from('blocking_schedule_assignments').insert({
+                schedule_id: scheduleId,
+                employee_id: directoryEmployees.find((employee) => employee.profile_id === targetProfileId)?.id || null,
+                assigned_by: adminUser.id,
+              });
+              if (assignmentQuery.error) throw assignmentQuery.error;
+            }
+          }
+        } else {
+          const legacyValues = {
+            ...ruleValues,
+            start_time: scheduleValues.start_time,
+            end_time: scheduleValues.end_time,
+            days_of_week: scheduleValues.days_of_week,
+          };
+          const query = ruleId
+            ? await getSupabaseClient().from('website_blocking_rules').update(legacyValues).eq('id', ruleId)
+            : await getSupabaseClient().from('website_blocking_rules').insert(legacyValues);
+          if (query.error) throw query.error;
+        }
         await writeChangeLog(ruleId ? 'Updated blocking schedule' : 'Created blocking schedule', 'Website blocking', ruleId || domain);
         resetRuleForm();
         await loadDashboardData();
