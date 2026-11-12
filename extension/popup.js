@@ -156,10 +156,12 @@ async function loadCurrentEmployee() {
 
 function isRuleActiveNow(rule, now = new Date()) {
   const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-  const days = Array.isArray(rule.days_of_week)
-    ? rule.days_of_week.map((value) => String(value).slice(0, 3).toLowerCase())
-    : [];
+  const rawDays = Array.isArray(rule.days_of_week) ? rule.days_of_week : String(rule.days_of_week || '').split(',');
+  const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3).toLowerCase()).filter(Boolean);
   if (!days.includes(day)) return false;
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (rule.starts_on && date < rule.starts_on) return false;
+  if (rule.expires_on && date > rule.expires_on) return false;
   const time = now.toTimeString().slice(0, 5);
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
@@ -180,12 +182,17 @@ async function loadEmployeeBlockingPolicies() {
   try {
     const syncResult = await syncBlockingRulesInBackground();
     const activeRules = syncResult.activePolicies || [];
-    document.getElementById('websiteStatus').textContent = String(activeRules.length);
+    document.getElementById('websiteStatus').textContent = String(syncResult.installedRuleCount);
     document.getElementById('blockedList').innerHTML = activeRules.map((rule) => (
       `<li>${escapeHtml(rule.domain)} · ${escapeHtml(String(rule.start_time).slice(0, 5))}–${escapeHtml(String(rule.end_time).slice(0, 5))}</li>`
     )).join('');
-    state.textContent = activeRules.length
-      ? 'These website rules are active for your account right now.'
+    console.info('[LOCTIV BLOCKING] Employee dashboard synchronization', {
+      installedRuleCount: syncResult.installedRuleCount,
+      activeDomains: syncResult.domains,
+      diagnostic: syncResult.diagnostic,
+    });
+    state.textContent = syncResult.installedRuleCount
+      ? 'These website rules are installed and active for your account right now.'
       : 'No website blocking rules are active for your account right now.';
     state.classList.remove('error-text');
   } catch (error) {

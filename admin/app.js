@@ -38,6 +38,11 @@ function normalizeBlockingDays(value) {
     .filter(Boolean);
 }
 
+function normalizeBlockingDomain(value) {
+  return String(value || '').trim().toLowerCase()
+    .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+}
+
 function isSupabaseConfigured() {
   const config = window.MINDLOCK_CONFIG;
   return Boolean(config?.supabaseUrl && config?.supabaseAnonKey && window.supabase?.createClient);
@@ -616,25 +621,32 @@ async function loadBlockingPolicies(client) {
   (assignmentResult.data || []).forEach((assignment) => {
     if (!assignmentBySchedule.has(assignment.schedule_id)) assignmentBySchedule.set(assignment.schedule_id, assignment);
   });
-  return {
-    canonical: true,
-    data: (ruleResult.data || []).map((rule) => {
-      const schedule = schedules.get(rule.schedule_id) || {};
-      const assignment = assignmentBySchedule.get(rule.schedule_id);
-      return {
-        ...rule,
-        schedule_id: rule.schedule_id,
-        start_time: schedule.start_time || '00:00',
-        end_time: schedule.end_time || '23:59',
-        days_of_week: normalizeBlockingDays(schedule.days_of_week),
-        starts_on: schedule.starts_on || null,
-        expires_on: schedule.expires_on || null,
-        target_profile_id: rule.target_profile_id || employeeProfiles.get(assignment?.employee_id) || null,
-        is_active: rule.is_active && schedule.is_active !== false,
-        created_by: rule.created_by || schedule.created_by,
-      };
-    }),
-  };
+  const rulesByDomain = new Map();
+  (ruleResult.data || []).forEach((rule) => {
+    const domain = normalizeBlockingDomain(rule.domain);
+    if (!rulesByDomain.has(domain)) rulesByDomain.set(domain, []);
+    rulesByDomain.get(domain).push(rule);
+  });
+  const data = [...schedules.values()].flatMap((schedule) => {
+    const linkedRules = (ruleResult.data || []).filter((rule) => rule.schedule_id === schedule.id);
+    const matchingRules = linkedRules.length
+      ? linkedRules
+      : (rulesByDomain.get(normalizeBlockingDomain(schedule.name)) || []);
+    const assignment = assignmentBySchedule.get(schedule.id);
+    return matchingRules.map((rule) => ({
+      ...rule,
+      schedule_id: schedule.id,
+      start_time: schedule.start_time || '00:00',
+      end_time: schedule.end_time || '23:59',
+      days_of_week: normalizeBlockingDays(schedule.days_of_week),
+      starts_on: schedule.starts_on || null,
+      expires_on: schedule.expires_on || null,
+      target_profile_id: rule.target_profile_id || employeeProfiles.get(assignment?.employee_id) || null,
+      is_active: rule.is_active && schedule.is_active !== false,
+      created_by: rule.created_by || schedule.created_by,
+    }));
+  });
+  return { canonical: true, data };
 }
 
 async function loadDashboardData() {

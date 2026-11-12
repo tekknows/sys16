@@ -19,6 +19,19 @@ function isScheduleActive(rule, now = new Date()) {
   return start <= end ? current >= start && current <= end : current >= start || current <= end;
 }
 
+function normalizeDomain(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/.*$/, '');
+}
+
+function logBlocking(message, details = {}) {
+  console.info(`[LOCTIV BLOCKING] ${message}`, details);
+}
+
 async function loadBlockingSchedules(session) {
   const config = globalThis.MINDLOCK_CONFIG;
   const headers = { apikey: config.supabaseAnonKey, Authorization: `******` };
@@ -38,24 +51,49 @@ async function loadBlockingSchedules(session) {
       employeeId ? `employee_id.eq.${encodeURIComponent(employeeId)}` : null,
       ...laptopIds.map((laptopId) => `laptop_id.eq.${encodeURIComponent(laptopId)}`),
     ].filter(Boolean);
-    const assignmentQuery = assignmentFilters.length
-      ? `blocking_schedule_assignments?or=(${assignmentFilters.join(',')})&select=schedule_id`
-      : 'blocking_schedule_assignments?id=eq.00000000-0000-0000-0000-000000000000&select=schedule_id';
+    const assignmentRequest = assignmentFilters.length
+      ? request(`blocking_schedule_assignments?or=(${assignmentFilters.join(',')})&select=id,schedule_id,employee_id,laptop_id`)
+      : Promise.resolve([]);
     const [schedules, rules, assignments] = await Promise.all([
-      request('blocking_schedules?is_active=eq.true&select=id,scope,start_time,end_time,days_of_week,starts_on,expires_on'),
+      request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on'),
       request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id,start_time,end_time,days_of_week'),
-      request(assignmentQuery),
+      assignmentRequest,
     ]);
     const scheduleMap = new Map(schedules.map((schedule) => [schedule.id, schedule]));
     const assignedScheduleIds = new Set(assignments.map((assignment) => assignment.schedule_id));
-    return rules
-      .map((rule) => ({ ...scheduleMap.get(rule.schedule_id), ...rule }))
-      .filter((rule) => (!rule.schedule_id || !rule.scope
-        || ['global', 'all'].includes(String(rule.scope).toLowerCase())
-        || assignedScheduleIds.has(rule.schedule_id))
-        && (!rule.target_profile_id || rule.target_profile_id === session.user.id));
+    const rulesByDomain = new Map();
+    rules.forEach((rule) => {
+      const domain = normalizeDomain(rule.domain);
+      if (!rulesByDomain.has(domain)) rulesByDomain.set(domain, []);
+      rulesByDomain.get(domain).push(rule);
+    });
+    const policies = schedules.flatMap((schedule) => {
+      const linkedRules = rules.filter((rule) => rule.schedule_id === schedule.id);
+      const matchingRules = linkedRules.length
+        ? linkedRules
+        : (rulesByDomain.get(normalizeDomain(schedule.name)) || []);
+      return matchingRules
+        .filter((rule) => {
+          const scope = String(schedule.scope || '').toLowerCase();
+          const isGlobal = !scope || scope === 'global' || scope === 'all';
+          return isGlobal || assignedScheduleIds.has(schedule.id);
+        })
+        .map((rule) => ({ ...schedule, ...rule, schedule_id: schedule.id }));
+    });
+    logBlocking('Retrieved policy records', {
+      authenticatedUserId: session.user.id,
+      employeeId,
+      employeeProfileId: session.user.id,
+      assignedLaptopIds: laptopIds,
+      globalSchedules: schedules.filter((schedule) => ['global', 'all', ''].includes(String(schedule.scope || '').toLowerCase())).length,
+      employeeSchedules: schedules.filter((schedule) => !['global', 'all', ''].includes(String(schedule.scope || '').toLowerCase())).length,
+      assignments,
+      domains: policies.map((policy) => policy.domain),
+    });
+    return policies;
   } catch (error) {
     const legacy = await request('website_blocking_rules?is_active=eq.true&select=domain,start_time,end_time,days_of_week,target_profile_id');
+    logBlocking('Canonical policy retrieval failed; using legacy rules', { error: error.message || String(error) });
     return legacy.filter((rule) => !rule.target_profile_id || rule.target_profile_id === session.user.id);
   }
 }
@@ -71,10 +109,10 @@ async function syncBlockingRules() {
     } catch (error) {
       schedules = cached['mindlock-blocking-policies'] || [];
       if (!schedules.length) throw new Error(`Could not synchronize website policies: ${error.message || error}`);
-      console.warn('Using cached website blocking policies after synchronization failure:', error);
+      console.warn('[LOCTIV BLOCKING] Using cached website blocking policies after synchronization failure:', error);
     }
   }
-  console.info('Website blocking synchronization:', {
+  logBlocking('Synchronization summary', {
     employeeId: session?.user?.id || null,
     retrievedPolicyCount: schedules.length,
     applicableScheduleCount: schedules.filter((rule) => isScheduleActive(rule)).length,
@@ -82,9 +120,13 @@ async function syncBlockingRules() {
   const domains = schedules.filter((rule) => {
     if (session && rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
     return isScheduleActive(rule);
-  }).map((rule) => String(rule.domain || '').trim().toLowerCase().replace(/^www\./, ''));
+  }).map((rule) => normalizeDomain(rule.domain));
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
+  logBlocking('Before synchronization', {
+    authenticatedUserId: session?.user?.id || null,
+    chromeRules: managedRules,
+  });
   const activeDomains = [...new Set(domains)]
     .map((domain) => String(domain).trim().toLowerCase().replace(/^www\./, ''))
     .filter((domain) => /^[a-z0-9.-]+$/.test(domain) && domain.includes('.'))
@@ -112,6 +154,11 @@ async function syncBlockingRules() {
     .filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100)
     .flatMap((rule) => rule.condition?.requestDomains || [])
     .sort();
+  logBlocking('After synchronization', {
+    activeDomains,
+    installedRules: installedRules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100),
+    installedRuleCount: installedActiveDomains.length,
+  });
   if (JSON.stringify(installedActiveDomains) !== JSON.stringify([...activeDomains].sort())) {
     throw new Error('The browser did not install the active website blocking rules. Reload the extension and try again.');
   }
@@ -135,6 +182,11 @@ async function syncBlockingRules() {
     domains: normalizedDomains,
     installedRuleCount: installedActiveDomains.length,
     activePolicies: schedules.filter((rule) => isScheduleActive(rule)),
+    diagnostic: {
+      retrievedPolicyCount: schedules.length,
+      applicableScheduleCount: schedules.filter((rule) => isScheduleActive(rule)).length,
+      activeDomainCount: activeDomains.length,
+    },
   };
 }
 
@@ -150,11 +202,11 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
 });
-chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
-chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
+chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
+chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[extensionSessionKey]) {
-    syncBlockingRules().catch((error) => console.error('Unable to update website blocking rules:', error));
+    syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to update website blocking rules:', error));
   }
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -166,7 +218,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ticketCheckAlarm) checkForTicketReplies();
-  if (alarm.name === policySyncAlarm) syncBlockingRules().catch((error) => console.error('Unable to refresh website blocking rules:', error));
+  if (alarm.name === policySyncAlarm) syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to refresh website blocking rules:', error));
 });
 
 async function getValidExtensionSession() {
