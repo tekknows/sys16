@@ -144,9 +144,9 @@ async function loadBlockingSchedules(session) {
   }
 }
 
-async function syncBlockingRules() {
+async function syncBlockingRules(sessionOverride = null) {
   const cached = await chrome.storage.local.get(['mindlock-blocking-policies']);
-  const session = await getValidExtensionSession();
+  const session = sessionOverride || await getValidExtensionSession();
   let schedules = [];
   if (session) {
     try {
@@ -163,6 +163,21 @@ async function syncBlockingRules() {
     retrievedPolicyCount: schedules.length,
     applicableScheduleCount: schedules.filter((rule) => isScheduleActive(rule)).length,
   });
+  if (!session) {
+    const installedRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const managedRules = installedRules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
+    const installedDomains = managedRules.flatMap((rule) => rule.condition?.requestDomains || []).sort();
+    logBlocking('No authenticated session; preserving existing Chrome rules', {
+      installedRuleCount: managedRules.length,
+      installedDomains,
+    });
+    return {
+      domains: installedDomains,
+      installedRuleCount: managedRules.length,
+      activePolicies: [],
+      diagnostic: { retrievedPolicyCount: 0, applicableScheduleCount: 0, activeDomainCount: installedDomains.length },
+    };
+  }
   const domains = schedules.filter((rule) => {
     if (session && rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
     return isScheduleActive(rule);
@@ -257,7 +272,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'sync-blocking-rules') return false;
-  syncBlockingRules()
+  syncBlockingRules(message.session || null)
     .then((result) => sendResponse({ ok: true, ...result }))
     .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
   return true;
@@ -270,6 +285,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 async function getValidExtensionSession() {
   const stored = await chrome.storage.local.get(extensionSessionKey);
   let session = stored[extensionSessionKey];
+  logBlocking('Session lookup', {
+    hasSession: Boolean(session),
+    hasAccessToken: Boolean(session?.access_token),
+    hasUserId: Boolean(session?.user?.id),
+  });
   if (!session || !globalThis.MINDLOCK_CONFIG?.supabaseUrl || !globalThis.MINDLOCK_CONFIG?.supabaseAnonKey) return null;
   if (session.expires_at * 1000 <= Date.now() + 60000) {
     const response = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=refresh_token`, {
