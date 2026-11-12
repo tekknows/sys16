@@ -18,7 +18,6 @@ function isScheduleActive(rule, now = new Date()) {
 }
 
 async function syncBlockingRules() {
-  const stored = await chrome.storage.local.get(['mindlock-last-blocking-domains']);
   const session = await getValidExtensionSession();
   let schedules = [];
   if (session) {
@@ -82,14 +81,16 @@ async function syncBlockingRules() {
     removeRuleIds: managedRules.map((rule) => rule.id),
     addRules,
   });
-  const normalizedDomains = [...activeDomains].sort();
-  const previousDomains = stored['mindlock-last-blocking-domains'];
-  const installedDomains = managedRules
+  const installedRules = await chrome.declarativeNetRequest.getDynamicRules();
+  const installedActiveDomains = installedRules
+    .filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100)
     .map((rule) => String(rule.condition?.urlFilter || '').replace(/^\|\|/, '').replace(/\^$/, ''))
     .sort();
-  const policyChanged = JSON.stringify(normalizedDomains) !== JSON.stringify(previousDomains)
-    || JSON.stringify(normalizedDomains) !== JSON.stringify(installedDomains);
-  if (policyChanged && normalizedDomains.length) {
+  if (JSON.stringify(installedActiveDomains) !== JSON.stringify([...activeDomains].sort())) {
+    throw new Error('The browser did not install the active website blocking rules. Reload the extension and try again.');
+  }
+  const normalizedDomains = [...activeDomains].sort();
+  if (normalizedDomains.length) {
     const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
     await Promise.all(tabs
       .filter((tab) => {
@@ -103,7 +104,6 @@ async function syncBlockingRules() {
       })
       .map((tab) => chrome.tabs.reload(tab.id).catch(() => undefined)));
   }
-  await chrome.storage.local.set({ 'mindlock-last-blocking-domains': normalizedDomains });
   return normalizedDomains;
 }
 
