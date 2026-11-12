@@ -6,7 +6,7 @@ const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 1;
 
 async function syncBlockingRules() {
-  const stored = await chrome.storage.local.get(['mindlock-blocking-enabled']);
+  const stored = await chrome.storage.local.get(['mindlock-blocking-enabled', 'mindlock-last-blocking-domains']);
   const session = await getValidExtensionSession();
   let schedules = [];
   if (session) {
@@ -60,10 +60,11 @@ async function syncBlockingRules() {
   }).map((rule) => rule.domain);
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
-  const addRules = stored['mindlock-blocking-enabled'] === false ? [] : [...new Set(domains)]
+  const activeDomains = stored['mindlock-blocking-enabled'] === false ? [] : [...new Set(domains)]
     .map((domain) => String(domain).trim().toLowerCase().replace(/^www\./, ''))
     .filter((domain) => /^[a-z0-9.-]+$/.test(domain) && domain.includes('.'))
-    .slice(0, 100)
+    .slice(0, 100);
+  const addRules = activeDomains
     .map((domain, index) => ({
       id: blockRuleIdStart + index,
       priority: 1,
@@ -74,6 +75,24 @@ async function syncBlockingRules() {
     removeRuleIds: managedRules.map((rule) => rule.id),
     addRules,
   });
+  const normalizedDomains = [...activeDomains].sort();
+  const previousDomains = stored['mindlock-last-blocking-domains'];
+  const policyChanged = JSON.stringify(normalizedDomains) !== JSON.stringify(previousDomains);
+  if (policyChanged && normalizedDomains.length) {
+    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+    await Promise.all(tabs
+      .filter((tab) => {
+        if (!tab.id || !tab.url) return false;
+        try {
+          const hostname = new URL(tab.url).hostname.toLowerCase().replace(/^www\./, '');
+          return normalizedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+        } catch {
+          return false;
+        }
+      })
+      .map((tab) => chrome.tabs.reload(tab.id).catch(() => undefined)));
+  }
+  await chrome.storage.local.set({ 'mindlock-last-blocking-domains': normalizedDomains });
 }
 
 const notifiedRepliesKey = 'mindlock-notified-replies';
