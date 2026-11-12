@@ -8,7 +8,7 @@ with normalized_schedules as (
   from public.blocking_schedules
 ),
 unique_schedule_domains as (
-  select normalized_domain, min(id) as schedule_id
+  select normalized_domain, (array_agg(id order by id))[1] as schedule_id
   from normalized_schedules
   group by normalized_domain
   having count(*) = 1
