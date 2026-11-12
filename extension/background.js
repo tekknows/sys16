@@ -6,7 +6,7 @@ const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 1;
 
 async function syncBlockingRules() {
-  const stored = await chrome.storage.local.get(['mindlock-blocking-enabled', 'mindlock-last-blocking-domains']);
+  const stored = await chrome.storage.local.get(['mindlock-last-blocking-domains']);
   const session = await getValidExtensionSession();
   let schedules = [];
   if (session) {
@@ -60,7 +60,7 @@ async function syncBlockingRules() {
   }).map((rule) => rule.domain);
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
-  const activeDomains = stored['mindlock-blocking-enabled'] === false ? [] : [...new Set(domains)]
+  const activeDomains = [...new Set(domains)]
     .map((domain) => String(domain).trim().toLowerCase().replace(/^www\./, ''))
     .filter((domain) => /^[a-z0-9.-]+$/.test(domain) && domain.includes('.'))
     .slice(0, 100);
@@ -68,7 +68,7 @@ async function syncBlockingRules() {
     .map((domain, index) => ({
       id: blockRuleIdStart + index,
       priority: 1,
-      action: { type: 'redirect', redirect: { extensionPath: '/blocked.html' } },
+      action: { type: 'block' },
       condition: { requestDomains: [domain], resourceTypes: ['main_frame'] },
     }));
   await chrome.declarativeNetRequest.updateDynamicRules({
@@ -77,7 +77,11 @@ async function syncBlockingRules() {
   });
   const normalizedDomains = [...activeDomains].sort();
   const previousDomains = stored['mindlock-last-blocking-domains'];
-  const policyChanged = JSON.stringify(normalizedDomains) !== JSON.stringify(previousDomains);
+  const installedDomains = managedRules
+    .flatMap((rule) => rule.condition?.requestDomains || [])
+    .sort();
+  const policyChanged = JSON.stringify(normalizedDomains) !== JSON.stringify(previousDomains)
+    || JSON.stringify(normalizedDomains) !== JSON.stringify(installedDomains);
   if (policyChanged && normalizedDomains.length) {
     const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
     await Promise.all(tabs
@@ -110,7 +114,7 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes[extensionSessionKey] || changes['mindlock-blocking-enabled'])) {
+  if (area === 'local' && changes[extensionSessionKey]) {
     syncBlockingRules().catch((error) => console.error('Unable to update website blocking rules:', error));
   }
 });
