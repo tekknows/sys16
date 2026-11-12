@@ -3,7 +3,19 @@ importScripts('config.js');
 const blockRuleIdStart = 1001;
 const extensionSessionKey = 'mindlock-extension-session';
 const policySyncAlarm = 'mindlock-policy-sync';
-const policySyncPeriodMinutes = 1;
+const policySyncPeriodMinutes = 0.5;
+
+function isScheduleActive(rule, now = new Date()) {
+  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const days = Array.isArray(rule.days_of_week)
+    ? rule.days_of_week.map((value) => String(value).slice(0, 3).toLowerCase())
+    : [];
+  if (!days.includes(day)) return false;
+  const current = now.toTimeString().slice(0, 5);
+  const start = String(rule.start_time || '00:00').slice(0, 5);
+  const end = String(rule.end_time || '23:59').slice(0, 5);
+  return start <= end ? current >= start && current <= end : current >= start || current <= end;
+}
 
 async function syncBlockingRules() {
   const stored = await chrome.storage.local.get(['mindlock-last-blocking-domains']);
@@ -49,15 +61,10 @@ async function syncBlockingRules() {
     }
     if (!hasTargetColumn) schedules = schedules.map((rule) => ({ ...rule, target_profile_id: null }));
   }
-  const day = new Date().toLocaleDateString('en-US', { weekday: 'short' });
-  const now = new Date().toTimeString().slice(0, 5);
   const domains = schedules.filter((rule) => {
-    if (rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
-    if (!(rule.days_of_week || []).includes(day)) return false;
-    const start = String(rule.start_time).slice(0, 5);
-    const end = String(rule.end_time).slice(0, 5);
-    return start <= end ? now >= start && now <= end : now >= start || now <= end;
-  }).map((rule) => rule.domain);
+    if (!session || (rule.target_profile_id && rule.target_profile_id !== session.user.id)) return false;
+    return isScheduleActive(rule);
+  }).map((rule) => String(rule.domain || '').trim().toLowerCase().replace(/^www\./, ''));
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
   const activeDomains = [...new Set(domains)]

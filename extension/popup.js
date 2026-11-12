@@ -155,8 +155,11 @@ async function loadCurrentEmployee() {
 }
 
 function isRuleActiveNow(rule, now = new Date()) {
-  const day = now.toLocaleDateString('en-US', { weekday: 'short' });
-  if (!(rule.days_of_week || []).includes(day)) return false;
+  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const days = Array.isArray(rule.days_of_week)
+    ? rule.days_of_week.map((value) => String(value).slice(0, 3).toLowerCase())
+    : [];
+  if (!days.includes(day)) return false;
   const time = now.toTimeString().slice(0, 5);
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
