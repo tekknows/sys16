@@ -97,6 +97,7 @@ Deno.serve(async (request) => {
       });
       return jsonResponse({ user_id: userId, password, message: 'Employee password reset.' });
     }
+    if (body.action) return jsonResponse({ error: 'Unsupported employee account action.' }, 400);
     const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
     const fullName = String(body.full_name || '').trim();

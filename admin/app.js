@@ -354,6 +354,13 @@ function escapeHtml(value) {
   }[character]));
 }
 
+function generateSecurePassword(length = 16) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
+  const values = new Uint32Array(length);
+  crypto.getRandomValues(values);
+  return Array.from(values, (value) => alphabet[value % alphabet.length]).join('');
+}
+
 function renderAnalytics() {
   const stats = document.getElementById('analyticsStats');
   const chart = document.getElementById('analyticsChart');
@@ -1730,6 +1737,23 @@ function setupDashboardInteractions() {
       button.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} ${password.getAttribute('autocomplete').replace('-', ' ')} password`);
     });
   });
+  document.querySelector('[data-generate-reset-password]')?.addEventListener('click', () => {
+    const form = document.getElementById('resetPasswordForm');
+    const newPassword = form?.elements.newPassword;
+    const confirmPassword = form?.elements.confirmPassword;
+    if (!newPassword || !confirmPassword) return;
+    const password = generateSecurePassword();
+    newPassword.value = password;
+    confirmPassword.value = password;
+    newPassword.type = 'text';
+    confirmPassword.type = 'text';
+    form.querySelectorAll('.eye-toggle').forEach((button) => {
+      button.setAttribute('aria-pressed', 'true');
+      button.setAttribute('aria-label', `Hide ${button.parentElement.querySelector('input').getAttribute('autocomplete').replace('-', ' ')} password`);
+    });
+    newPassword.focus();
+    newPassword.select();
+  });
   document.getElementById('changePasswordForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fields = [...event.currentTarget.querySelectorAll('input[type="password"]')];
@@ -2320,10 +2344,7 @@ function setupDashboardInteractions() {
     if (employee) {
       const passwordInput = createRecordForm.querySelector('input[name="password"]');
       createRecordForm.querySelector('[data-generate-password]')?.addEventListener('click', () => {
-        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
-        const values = new Uint32Array(16);
-        crypto.getRandomValues(values);
-        passwordInput.value = Array.from(values, (value) => alphabet[value % alphabet.length]).join('');
+        passwordInput.value = generateSecurePassword();
         passwordInput.focus();
         passwordInput.select();
       });
