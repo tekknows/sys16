@@ -15,6 +15,11 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - `supabase/migrations/006_blocking_rule_employee_targets.sql` — optional employee-specific website blocking policies
 - `supabase/migrations/007_device_registration_monitoring.sql` — secure device registration, assignment history, and heartbeat connection logs
 - `supabase/migrations/008_settings_retention_and_assignment.sql` — persistent settings, retention cleanup, and assignment expiry
+- `supabase/migrations/009_blocking_policy_relationship.sql` — link blocking rules to schedules and schedule assignments
+- `supabase/migrations/010_blocking_schedule_metadata.sql` — schedule descriptions and time zones
+- `supabase/migrations/011_backfill_blocking_schedule_links.sql` — backfill unambiguous schedule links
+- `supabase/migrations/012_ticket_notifications.sql` — notifications for newly submitted employee tickets
+- `supabase/migrations/013_admin_ticket_notifications_and_employee_deletion.sql` — admin ticket update notifications and safe deletion of accounts with ticket history
 - `supabase/functions/device-registration/` — admin-only device registration and revocation endpoint
 - `supabase/functions/device-heartbeat/` — credential-verified laptop heartbeat endpoint
 - `supabase/functions/employee-account/` — administrator-only employee Auth account and profile creation endpoint
@@ -41,13 +46,15 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Run `supabase/migrations/009_blocking_policy_relationship.sql` after migration 008 to link blocked domains to their schedules and enable schedule assignment policies.
 - Run `supabase/migrations/010_blocking_schedule_metadata.sql` after migration 009 to add schedule descriptions and explicit timezones. Existing schedules default to `Asia/Manila`.
 - Run `supabase/migrations/011_backfill_blocking_schedule_links.sql` after migration 010 to backfill unambiguous domain-to-schedule links without overwriting existing links.
+- Run `supabase/migrations/012_ticket_notifications.sql` to notify administrators and IT staff about new employee tickets.
+- Run `supabase/migrations/013_admin_ticket_notifications_and_employee_deletion.sql` after migration 012 to notify administrators about IT staff updates and allow employee account deletion while retaining ticket history.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js`, the extension, or the Windows agent.
 - Deploy from the project root with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt`. The registration endpoint checks the admin JWT itself; the heartbeat endpoint authenticates the device credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.
 - Redeploy `employee-account` after pulling changes to password reset behavior; an older deployed version treats reset requests as new-account requests and may report a misleading email validation error.
 - If the dashboard reports that the employee-account service could not be reached, run the deployment command from the repository root and confirm the function is available at `https://YOUR-PROJECT.supabase.co/functions/v1/employee-account`. Serve the dashboard from a local web server such as `python -m http.server 8000`, not a `file://` page.
 - Create employee accounts from the admin dashboard after deploying `employee-account`; it creates the Supabase Auth user and matching `profiles`, `employees`, and `user_roles` rows automatically. Create the first administrator account through Supabase Auth, then create its profile and administrator role during initial setup. Do not insert users directly into Supabase's `auth` tables.
-- Deactivate users with ticket history instead of deleting their profiles; the conversation migration restricts deletion so ticket records and sender history are retained.
+- Employee account deletion retains ticket, message, attachment, assignment, and note history; references to the deleted profile are cleared by migration 013.
 - Add the project URL and public anon key to both `admin/config.js` and `extension/config.js`. Never put a Supabase service-role key in the dashboard or extension.
 - Enable the extension for incognito use in the browser's extension settings if the organization's policy requires blocking there; browsers do not allow an extension to silently enable itself in incognito.
 - Apply and verify your Supabase Auth, Storage, and Realtime settings before deployment. Ticket attachments use the private `ticket-attachments` bucket created by migration 003.

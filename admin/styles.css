@@ -639,6 +639,12 @@ textarea,
   overflow-x: auto;
 }
 
+.blocking-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .card-header {
   display: flex;
   align-items: center;

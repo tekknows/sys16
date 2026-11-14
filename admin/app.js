@@ -478,8 +478,10 @@ function renderBlockingTable() {
           <td>${escapeHtml(days)}</td>
           <td><span class="status-pill ${status === 'Active' ? 'success' : status === 'Scheduled' ? 'warning' : 'neutral'}">${status}</span></td>
           <td>
-            <button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button>
-            <button class="text-btn blocking-delete-btn" type="button" data-rule-id="${escapeHtml(row.id)}">Delete</button>
+            <div class="blocking-rule-actions">
+              <button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button>
+              <button class="text-btn blocking-delete-btn" type="button" data-rule-id="${escapeHtml(row.id)}">Delete</button>
+            </div>
           </td>
         </tr>
       `;
@@ -530,8 +532,22 @@ function renderEmployeeTable() {
   if (!table) return;
   const query = (document.getElementById('employeeSearch')?.value || '').trim().toLowerCase();
   const status = document.getElementById('employeeStatusFilter')?.value || '';
+  const departmentFilter = document.getElementById('employeeDepartmentFilter');
+  let selectedDepartment = departmentFilter?.value || '';
+  const departments = [...new Set(directoryEmployees
+    .map((row) => (row.department || '').trim())
+    .filter(Boolean))]
+    .sort((first, second) => first.localeCompare(second));
+  if (departmentFilter) {
+    departmentFilter.innerHTML = `<option value="">All departments</option>${departments
+      .map((department) => `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`).join('')}`;
+    selectedDepartment = departments.includes(selectedDepartment) ? selectedDepartment : '';
+    departmentFilter.value = selectedDepartment;
+  }
   table.innerHTML = directoryEmployees
-    .filter((row) => (!status || (row.active ? 'Active' : 'Suspended') === status) && (!query || `${row.user_id} ${row.name} ${row.department} ${row.position} ${row.email}`.toLowerCase().includes(query)))
+    .filter((row) => (!status || (row.active ? 'Active' : 'Suspended') === status)
+      && (!selectedDepartment || (row.department || '').trim() === selectedDepartment)
+      && (!query || `${row.user_id} ${row.name} ${row.department} ${row.position} ${row.email}`.toLowerCase().includes(query)))
     .map((row) => {
       const assignment = getEmployeeLaptopAssignment(row.id);
       const registration = assignment ? getActiveDeviceRegistration(assignment.laptop) : null;
@@ -2325,6 +2341,7 @@ function setupDashboardInteractions() {
   });
 
   document.getElementById('employeeSearch')?.addEventListener('input', renderEmployeeTable);
+  document.getElementById('employeeDepartmentFilter')?.addEventListener('change', renderEmployeeTable);
   document.getElementById('employeeStatusFilter')?.addEventListener('change', renderEmployeeTable);
   document.getElementById('employeeTable')?.addEventListener('click', async (event) => {
     const actionsButton = event.target.closest('.employee-actions-btn');
