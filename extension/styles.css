@@ -516,6 +516,17 @@ h1, h2 {
   gap: 8px;
 }
 
+#issueForm input,
+#issueForm select,
+#issueForm textarea {
+  box-sizing: border-box;
+}
+
+#issueForm textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
 input, select, textarea {
   width: 100%;
   border: 1px solid var(--border);
@@ -527,6 +538,34 @@ input, select, textarea {
 
 #extensionLoginForm input {
   box-sizing: border-box;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 56px;
+}
+
+.password-visibility-btn {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.password-visibility-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
 }
 
 .primary-btn {

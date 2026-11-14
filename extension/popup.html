@@ -21,7 +21,13 @@
       <p class="muted-copy">Sign in with your company account to view tickets and contact IT.</p>
       <form id="extensionLoginForm" class="stack-form">
         <label><span>Email</span><input id="extensionEmail" type="email" autocomplete="username" required /></label>
-        <label><span>Password</span><input id="extensionPassword" type="password" autocomplete="current-password" required /></label>
+        <label>
+          <span>Password</span>
+          <div class="password-field">
+            <input id="extensionPassword" type="password" autocomplete="current-password" required />
+            <button id="toggleExtensionPassword" class="password-visibility-btn" type="button" aria-label="Show password" aria-pressed="false">Show</button>
+          </div>
+        </label>
         <button type="submit" class="primary-btn">Sign in</button>
         <p id="extensionLoginState" class="inline-state" role="status"></p>
       </form>
@@ -37,15 +43,14 @@
 
       <section class="card-block release-notes" aria-labelledby="extensionReleaseTitle">
         <div class="section-title-row">
-          <h2 id="extensionReleaseTitle">What’s new</h2>
-          <span class="theme-pill">v1.2.0</span>
+          <h2 id="extensionReleaseTitle">Extension updates</h2>
+          <span class="theme-pill">From admin release notes</span>
         </div>
-        <p class="muted-copy">Latest LOCTIV admin and employee experience updates.</p>
+        <p class="muted-copy">Employee-extension updates from the admin release notes.</p>
         <ul class="release-list">
-          <li>Improved dashboard attention and settings workflows</li>
-          <li>Added employee password reset confirmation</li>
-          <li>Added employee account actions through the gear menu</li>
-          <li>Improved login password visibility controls and dark mode</li>
+          <li><strong>v1.2.0:</strong> Improved employee sign-in password visibility in light and dark mode.</li>
+          <li><strong>v1.1.0:</strong> Added support for employee-specific website blocking schedules.</li>
+          <li><strong>v1.0.0:</strong> Introduced employee access, support tickets, and website policy sync.</li>
         </ul>
       </section>
 
@@ -100,13 +105,13 @@
         </div>
       </section>
 
-      <section class="card-block">
+      <section class="card-block hidden">
         <h2>Current blocking policy</h2>
         <p class="muted-copy" id="blockingPolicyState" role="status">Loading policies…</p>
         <ul id="blockedList" class="list-items"></ul>
       </section>
 
-      <section class="card-block">
+      <section class="card-block hidden">
         <h2>Usage summary</h2>
         <div class="usage-row">
           <div>
