@@ -70,6 +70,9 @@ async function loadBlockingSchedules(session) {
   try {
     const employees = await request(`employees?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id&limit=1`);
     const employeeId = employees[0]?.id;
+    if (!employeeId) {
+      throw new Error(`No employee record found for authenticated profile ${session.user.id}`);
+    }
     const laptopAssignments = employeeId
       ? await request(`laptop_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&status=eq.Active&select=laptop_id`)
       : [];
@@ -92,6 +95,11 @@ async function loadBlockingSchedules(session) {
         .catch(() => request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on')),
       assignmentRequest,
     ]);
+    logBlocking('Required policy tables retrieved', {
+      employeeId,
+      scheduleCount: schedules.length,
+      assignmentCount: assignments?.length ?? 0,
+    });
     let rules = [];
     try {
       rules = await request('website_blocking_rules?is_active=eq.true&select=domain,schedule_id,target_profile_id,start_time,end_time,days_of_week');
@@ -146,9 +154,13 @@ async function loadBlockingSchedules(session) {
     });
     return policies;
   } catch (error) {
-    const legacy = await request('website_blocking_rules?is_active=eq.true&select=domain,start_time,end_time,days_of_week,target_profile_id');
-    logBlocking('Canonical policy retrieval failed; using legacy rules', { error: error.message || String(error) });
-    return legacy.filter((rule) => !rule.target_profile_id || rule.target_profile_id === session.user.id);
+    try {
+      const legacy = await request('website_blocking_rules?is_active=eq.true&select=domain,start_time,end_time,days_of_week,target_profile_id');
+      logBlocking('Canonical policy retrieval failed; using legacy rules', { error: error.message || String(error) });
+      return legacy.filter((rule) => !rule.target_profile_id || rule.target_profile_id === session.user.id);
+    } catch (legacyError) {
+      throw new Error(`Policy retrieval failed after canonical and legacy queries: ${error.message || error}; legacy: ${legacyError.message || legacyError}`);
+    }
   }
 }
 
