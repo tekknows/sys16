@@ -188,17 +188,63 @@ function updateSyncStatus() {
 }
 
 function isRuleActiveNow(rule, now = new Date()) {
-  const day = now.toLocaleDateString('en-US', { weekday: 'short' });
-  if (!(rule.days_of_week || []).includes(day)) return false;
-  const time = now.toTimeString().slice(0, 5);
+  const timezone = rule.timezone || 'Asia/Manila';
+  const parts = getZonedClock(now, timezone);
+  const rawDays = Array.isArray(rule.days_of_week) ? rule.days_of_week : String(rule.days_of_week || '').split(',');
+  const days = rawDays.flatMap((value) => String(value).split(/[,\s]+/)).map((value) => value.slice(0, 3).toLowerCase()).filter(Boolean);
+  const time = parts.time;
   const start = String(rule.start_time || '00:00').slice(0, 5);
   const end = String(rule.end_time || '23:59').slice(0, 5);
-  return start <= end ? time >= start && time <= end : time >= start || time <= end;
+  const overnight = start > end;
+  const afterStart = time >= start;
+  const beforeEnd = time <= end;
+  if (overnight && !afterStart && !beforeEnd) return false;
+  if (!overnight && !(time >= start && time <= end)) return false;
+  const scheduleDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  if (overnight && beforeEnd && !afterStart) scheduleDate.setUTCDate(scheduleDate.getUTCDate() - 1);
+  const scheduleDay = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toLowerCase();
+  if (!days.includes(scheduleDay)) return false;
+  const scheduleDateValue = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
+  return (!rule.starts_on || scheduleDateValue >= rule.starts_on) && (!rule.expires_on || scheduleDateValue <= rule.expires_on);
+}
+
+function getZonedClock(date, timezone) {
+  const values = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).reduce((result, part) => {
+    if (part.type !== 'literal') result[part.type] = part.value;
+    return result;
+  }, {});
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    time: `${values.hour}:${values.minute}`,
+  };
+}
+
+async function syncBlockingRulesInBackground() {
+  const result = await chrome.runtime.sendMessage({
+    type: 'sync-blocking-rules',
+    session: extensionSession,
+  });
+  if (!result?.ok) throw new Error(result?.error || 'The extension could not install the active blocking rules.');
+  if (result.installedRuleCount !== result.domains.length) {
+    throw new Error(`Only ${result.installedRuleCount} of ${result.domains.length} active website rules were installed by Chrome.`);
+  }
+  return result;
 }
 
 async function loadEmployeeBlockingPolicies() {
   const state = document.getElementById('blockingPolicyState');
   try {
+<<<<<<< HEAD
     let hasScheduleColumns = true;
     let hasTargetColumn = true;
     let rules;
@@ -236,11 +282,21 @@ async function loadEmployeeBlockingPolicies() {
     document.getElementById('websiteStatus').textContent = String(activeRules.length);
     lastPolicySyncAt = Date.now();
     updateSyncStatus();
+=======
+    const syncResult = await syncBlockingRulesInBackground();
+    const activeRules = syncResult.activePolicies || [];
+    document.getElementById('websiteStatus').textContent = String(syncResult.installedRuleCount);
+>>>>>>> df1b0a0179f8f1b8835c528e9887665a1e30de65
     document.getElementById('blockedList').innerHTML = activeRules.map((rule) => (
       `<li>${escapeHtml(rule.domain)} · ${escapeHtml(String(rule.start_time).slice(0, 5))}–${escapeHtml(String(rule.end_time).slice(0, 5))}</li>`
     )).join('');
-    state.textContent = activeRules.length
-      ? 'These website rules are active for your account right now.'
+    console.info('[LOCTIV BLOCKING] Employee dashboard synchronization', {
+      installedRuleCount: syncResult.installedRuleCount,
+      activeDomains: syncResult.domains,
+      diagnostic: syncResult.diagnostic,
+    });
+    state.textContent = syncResult.installedRuleCount
+      ? 'These website rules are installed and active for your account right now.'
       : 'No website blocking rules are active for your account right now.';
     state.classList.remove('error-text');
   } catch (error) {

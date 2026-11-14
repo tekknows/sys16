@@ -36,7 +36,7 @@
         </nav>
 
         <div class="sidebar-meta">
-          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.1.0">v1.1.0</button>
+          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.2.0">v1.2.0</button>
           <button class="secondary-btn small-btn" id="logoutBtn">Logout</button>
         </div>
       </aside>
@@ -149,6 +149,13 @@
               <label>
                 <span>End time</span>
                 <input name="endTime" type="time" value="17:30" />
+              </label>
+              <label>
+                <span>Timezone</span>
+                <select name="timezone">
+                  <option value="Asia/Manila" selected>Asia/Manila</option>
+                  <option value="UTC">UTC</option>
+                </select>
               </label>
               <div class="span-2 days-field">
                 <span>Days of week</span>
@@ -555,7 +562,18 @@
       <section class="modal-card update-logs-modal-card">
         <div class="card-header"><div><p class="eyebrow">Current release</p><h2 id="updateLogsTitle">Update logs</h2></div><button class="icon-btn" data-close-modal aria-label="Close update logs">×</button></div>
         <div class="update-logs-content">
-          <div class="version-banner"><span>Version</span><strong>1.1.0</strong><time datetime="2026-11-08">November 8, 2026</time></div>
+         <div class="version-banner"><span>Version</span><strong>1.2.0</strong><time datetime="2026-11-11">November 11, 2026</time></div>
+         <h3>Admin experience update</h3>
+         <p>Improves dashboard attention workflows, employee account actions, and login usability.</p>
+         <ul>
+           <li>Move the Needs attention panel below the dashboard metric cards</li>
+           <li>Add a Settings option for assignment retention days</li>
+           <li>Add password reset confirmation fields for employee accounts</li>
+           <li>Add an employee actions gear menu with password reset</li>
+           <li>Improve login password visibility controls in light and dark mode</li>
+         </ul>
+         <hr />
+         <div class="version-banner"><span>Version</span><strong>1.1.0</strong><time datetime="2026-11-08">November 8, 2026</time></div>
           <h3>Employee and device monitoring update</h3>
           <p>Improves laptop assignment and adds secure device registration and connection monitoring.</p>
           <ul>
@@ -663,8 +681,12 @@
         <div class="card-header"><h2 id="resetPasswordTitle">Reset employee password</h2><button class="icon-btn" data-close-modal aria-label="Close password reset">×</button></div>
         <p id="resetPasswordEmployee" class="panel-subtitle"></p>
         <form id="resetPasswordForm" class="form-grid compact">
-          <label><span>New password</span><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required /></label>
-          <label><span>Confirm password</span><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required /></label>
+          <label><span>New password</span><span class="password-input"><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required /></span></label>
+          <label><span>Confirm password</span><span class="password-input"><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required /></span></label>
+          <div class="span-2 actions-row reset-password-tools">
+            <button type="button" class="secondary-btn icon-action-btn" data-generate-reset-password aria-label="Generate password" title="Generate password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h3M20 17v3h-3M5.5 18.5 4 20m14.5-16L20 2M4 12a8 8 0 0 1 13.7-5.7L20 8M20 12a8 8 0 0 1-13.7 5.7L4 16"></path></svg></button>
+            <button type="button" class="secondary-btn icon-action-btn" id="toggleResetPasswordsBtn" aria-label="Show passwords" aria-pressed="false" title="Show passwords"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+          </div>
           <div class="span-2 actions-row"><button type="submit" class="primary-btn">Reset password</button><button type="button" class="secondary-btn" data-close-modal>Cancel</button></div>
           <p class="span-2 form-state hidden" id="resetPasswordState" role="status"></p>
         </form>
