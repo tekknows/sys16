@@ -113,6 +113,32 @@ body.dark-mode .brand-panel {
   margin-bottom: 18px;
 }
 
+.brand-logo {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  margin-bottom: 18px;
+}
+
+.attention-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 22px;
+  margin-bottom: 22px;
+  box-shadow: var(--shadow);
+}
+
+.attention-card h3,
+.attention-card p {
+  margin: 0;
+}
+
+.attention-card p {
+  color: var(--text-soft);
+  margin-top: 6px;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   text-transform: uppercase;
@@ -194,13 +220,12 @@ textarea,
 }
 
 .password-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  position: relative;
 }
 
 .password-row input {
-  flex: 1;
+  width: 100%;
+  padding-right: 48px;
 }
 
 .password-toggle,
@@ -1447,12 +1472,52 @@ th {
   right: 12px;
 }
 
+.employee-actions {
+  position: relative;
+  display: inline-block;
+}
+
+.employee-actions-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.employee-action-menu {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 150px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.employee-action-menu .text-btn {
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
 .eye-toggle-login {
-  min-width: 42px;
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  min-width: 38px;
   color: var(--text-soft);
   background: transparent;
   padding: 8px;
   line-height: 1;
+  transform: translateY(-50%);
+}
+
+body.dark-mode.login-page .eye-toggle-login {
+  color: #000;
 }
 
 .eye-icon {

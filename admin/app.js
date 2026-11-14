@@ -287,13 +287,10 @@ function renderSettingsForms() {
     retention.elements.keepMessagesIndefinitely.checked = settingValue('keep_messages_indefinitely', false);
     retention.elements.policySyncEnabled.checked = settingValue('policy_sync_enabled', true);
     retention.elements.disposalCleanupDays.value = settingValue('disposal_laptop_cleanup_days', 30);
+    retention.elements.assignmentRetentionDays.value = settingValue('assignment_retention_days', 30);
   }
   const incognito = document.getElementById('incognitoSettingsForm');
-  if (incognito) {
-    const enabled = Boolean(settingValue('global_incognito_policy', false));
-    incognito.querySelector('#incognitoToggle').checked = enabled;
-    document.getElementById('incognitoStatus').textContent = enabled ? 'Enabled' : 'Disabled';
-  }
+  if (incognito) incognito.querySelector('#incognitoToggle').checked = settingValue('global_incognito_policy', false);
 }
 
 function renderActivityList() {
@@ -476,7 +473,14 @@ function renderEmployeeTable() {
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
         <td>${escapeHtml(formatDate(assignment?.laptop.last_seen_at || registration?.last_heartbeat_at))}</td>
         <td>${statusPill(row.active ? (row.account_status || 'Active') : 'Suspended')}</td>
-        <td><button type="button" class="text-btn employee-password-btn" data-employee-id="${escapeHtml(row.profile_id)}">Reset password</button></td>
+        <td>
+          <div class="employee-actions">
+            <button type="button" class="icon-btn employee-actions-btn" aria-label="Employee actions" aria-expanded="false" title="Employee actions">⚙</button>
+            <div class="employee-action-menu hidden">
+              <button type="button" class="text-btn employee-password-btn" data-employee-id="${escapeHtml(row.profile_id)}">Reset password</button>
+            </div>
+          </div>
+        </td>
       </tr>`;
     }).join('') || '<tr><td colspan="9">No employees found.</td></tr>';
 }
@@ -673,8 +677,6 @@ async function loadDashboardData() {
     activityLogs = logResult.data || [];
     notifications = notificationResult.data || [];
     renderSettingsForms();
-    const assignmentRetentionInput = document.getElementById('assignmentRetentionDays');
-    if (assignmentRetentionInput) assignmentRetentionInput.value = settingValue('assignment_retention_days', 30);
     renderMetricCards();
     renderDashboardAttention();
     renderActivityList();
@@ -1859,76 +1861,76 @@ function setupDashboardInteractions() {
         link.setAttribute('aria-selected', String(active));
       });
 
+      const bindSettingsForm = (id, settings, stateId) => {
+        document.getElementById(id)?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const state = document.getElementById(stateId);
+          const button = form.querySelector('button[type="submit"]');
+          button.disabled = true;
+          state.classList.add('hidden');
+          try {
+            await saveSystemSettings(settings(form));
+            state.textContent = 'Settings saved.';
+            state.classList.remove('hidden', 'error-text');
+            showToast('Settings saved.');
+          } catch (error) {
+            state.textContent = `Settings could not be saved: ${error.message}`;
+            state.classList.remove('hidden');
+            state.classList.add('error-text');
+            showToast(state.textContent, true);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      };
+      bindSettingsForm('generalSettingsForm', (form) => ({
+        company_name: { value: form.elements.companyName.value.trim() },
+        timezone: { value: form.elements.timezone.value.trim() },
+        notification_preferences: { value: form.elements.notificationPreference.value },
+      }), 'generalSettingsState');
+      bindSettingsForm('ticketSettingsForm', (form) => ({
+        ticket_default_status: { value: form.elements.defaultTicketStatus.value },
+        ticket_id_prefix: { value: form.elements.ticketPrefix.value.trim().toUpperCase() },
+        support_instructions: { value: form.elements.supportInstructions.value.trim() },
+      }), 'ticketSettingsState');
+      bindSettingsForm('retentionSettingsForm', (form) => ({
+        message_retention_days: Number(form.elements.messageRetentionDays.value),
+        message_auto_cleanup: form.elements.messageAutoCleanup.checked,
+        resolved_ticket_cleanup_days: Number(form.elements.ticketCleanupDays.value),
+        retention_history_days: Number(form.elements.historyRetentionDays.value),
+        keep_messages_indefinitely: form.elements.keepMessagesIndefinitely.checked,
+        policy_sync_enabled: form.elements.policySyncEnabled.checked,
+        disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
+        assignment_retention_days: Number(form.elements.assignmentRetentionDays.value),
+      }), 'retentionSettingsState');
+      document.getElementById('incognitoSettingsForm')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          await saveSystemSettings({ global_incognito_policy: event.currentTarget.querySelector('#incognitoToggle').checked });
+          document.getElementById('incognitoStatus').textContent = event.currentTarget.querySelector('#incognitoToggle').checked ? 'Enabled' : 'Disabled';
+          showToast('Incognito setting saved.');
+        } catch (error) {
+          showToast(`Incognito setting could not be saved: ${error.message}`, true);
+        }
+      });
+      document.getElementById('cleanupDisposalBtn')?.addEventListener('click', async () => {
+        const days = Number(document.querySelector('#retentionSettingsForm [name="disposalCleanupDays"]').value);
+        if (!Number.isInteger(days) || days < 1 || !window.confirm(`Delete retired laptops older than ${days} days?`)) return;
+        try {
+          const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+          const { error } = await getSupabaseClient().from('laptops').delete().eq('status', 'Retired').lt('created_at', cutoff);
+          if (error) throw error;
+          await loadDashboardData();
+          showToast('Disposal laptops cleaned up.');
+        } catch (error) {
+          showToast(`Disposal cleanup failed: ${error.message}`, true);
+        }
+      });
       document.querySelectorAll('.tab-panel').forEach((panel) => {
         panel.classList.toggle('active', panel === target);
       });
     });
-  });
-
-  const bindSettingsForm = (id, settings, stateId) => {
-    document.getElementById(id)?.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const state = document.getElementById(stateId);
-      const button = form.querySelector('button[type="submit"]');
-      button.disabled = true;
-      state.classList.add('hidden');
-      try {
-        await saveSystemSettings(settings(form));
-        state.textContent = 'Settings saved.';
-        state.classList.remove('hidden', 'error-text');
-        showToast('Settings saved.');
-      } catch (error) {
-        state.textContent = `Settings could not be saved: ${error.message}`;
-        state.classList.remove('hidden');
-        state.classList.add('error-text');
-        showToast(state.textContent, true);
-      } finally {
-        button.disabled = false;
-      }
-    });
-  };
-  bindSettingsForm('generalSettingsForm', (form) => ({
-    company_name: { value: form.elements.companyName.value.trim() },
-    timezone: { value: form.elements.timezone.value.trim() },
-    notification_preferences: { value: form.elements.notificationPreference.value },
-  }), 'generalSettingsState');
-  bindSettingsForm('ticketSettingsForm', (form) => ({
-    ticket_default_status: { value: form.elements.defaultTicketStatus.value },
-    ticket_id_prefix: { value: form.elements.ticketPrefix.value.trim().toUpperCase() },
-    support_instructions: { value: form.elements.supportInstructions.value.trim() },
-  }), 'ticketSettingsState');
-  bindSettingsForm('retentionSettingsForm', (form) => ({
-    message_retention_days: Number(form.elements.messageRetentionDays.value),
-    message_auto_cleanup: form.elements.messageAutoCleanup.checked,
-    resolved_ticket_cleanup_days: Number(form.elements.ticketCleanupDays.value),
-    retention_history_days: Number(form.elements.historyRetentionDays.value),
-    keep_messages_indefinitely: form.elements.keepMessagesIndefinitely.checked,
-    policy_sync_enabled: form.elements.policySyncEnabled.checked,
-    disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
-  }), 'retentionSettingsState');
-  document.getElementById('incognitoSettingsForm')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await saveSystemSettings({ global_incognito_policy: event.currentTarget.querySelector('#incognitoToggle').checked });
-      document.getElementById('incognitoStatus').textContent = event.currentTarget.querySelector('#incognitoToggle').checked ? 'Enabled' : 'Disabled';
-      showToast('Incognito setting saved.');
-    } catch (error) {
-      showToast(`Incognito setting could not be saved: ${error.message}`, true);
-    }
-  });
-  document.getElementById('cleanupDisposalBtn')?.addEventListener('click', async () => {
-    const days = Number(document.querySelector('#retentionSettingsForm [name="disposalCleanupDays"]').value);
-    if (!Number.isInteger(days) || days < 1 || !window.confirm(`Delete retired laptops older than ${days} days?`)) return;
-    try {
-      const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-      const { error } = await getSupabaseClient().from('laptops').delete().eq('status', 'Retired').lt('created_at', cutoff);
-      if (error) throw error;
-      await loadDashboardData();
-      showToast('Disposal laptops cleaned up.');
-    } catch (error) {
-      showToast(`Disposal cleanup failed: ${error.message}`, true);
-    }
   });
 
   const scheduleForm = document.getElementById('scheduleForm');
@@ -2025,7 +2027,7 @@ function setupDashboardInteractions() {
       event.preventDefault();
       const employeeId = document.getElementById('assignmentEmployee').value;
       const laptopId = document.getElementById('assignmentLaptop').value;
-      const retentionDays = Number(document.getElementById('assignmentRetentionDays').value);
+      const retentionDays = Number(settingValue('assignment_retention_days', 30));
       const employee = directoryEmployees.find((row) => row.id === employeeId);
       const laptop = directoryLaptops.find((row) => row.id === laptopId);
       if (!employee || !laptop || laptop.status === 'Retired' || !employee.active) {
@@ -2092,28 +2094,70 @@ function setupDashboardInteractions() {
   document.getElementById('employeeSearch')?.addEventListener('input', renderEmployeeTable);
   document.getElementById('employeeStatusFilter')?.addEventListener('change', renderEmployeeTable);
   document.getElementById('employeeTable')?.addEventListener('click', async (event) => {
+    const actionsButton = event.target.closest('.employee-actions-btn');
+    if (actionsButton) {
+      const menu = actionsButton.nextElementSibling;
+      document.querySelectorAll('.employee-action-menu').forEach((item) => {
+        if (item !== menu) item.classList.add('hidden');
+      });
+      menu?.classList.toggle('hidden');
+      actionsButton.setAttribute('aria-expanded', String(!menu?.classList.contains('hidden')));
+      return;
+    }
     const button = event.target.closest('.employee-password-btn');
     if (!button) return;
     const employee = directoryEmployees.find((row) => row.profile_id === button.dataset.employeeId);
     if (!employee) return;
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
-    const values = new Uint32Array(16);
-    crypto.getRandomValues(values);
-    const password = Array.from(values, (value) => alphabet[value % alphabet.length]).join('');
-    if (!window.confirm(`Generate a new temporary password for ${employee.name}?`)) return;
-    button.disabled = true;
+    const modal = document.getElementById('resetPasswordModal');
+    const form = document.getElementById('resetPasswordForm');
+    const state = document.getElementById('resetPasswordState');
+    if (!modal || !form || !state) return;
+    form.dataset.employeeId = employee.profile_id;
+    form.dataset.employeeRecordId = employee.user_id;
+    document.getElementById('resetPasswordEmployee').textContent = `Set a new password for ${employee.name}.`;
+    form.reset();
+    state.textContent = '';
+    state.classList.add('hidden');
+    modal.classList.remove('hidden');
+    form.elements.newPassword.focus();
+  });
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('.employee-actions')) return;
+    document.querySelectorAll('.employee-action-menu').forEach((menu) => menu.classList.add('hidden'));
+    document.querySelectorAll('.employee-actions-btn').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+  });
+  document.getElementById('resetPasswordForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const state = document.getElementById('resetPasswordState');
+    const submit = form.querySelector('button[type="submit"]');
+    const newPassword = form.elements.newPassword;
+    const confirmPassword = form.elements.confirmPassword;
+    state.classList.add('hidden');
+    newPassword.setCustomValidity('');
+    confirmPassword.setCustomValidity('');
+    if (newPassword.value !== confirmPassword.value) {
+      confirmPassword.setCustomValidity('Passwords do not match.');
+      confirmPassword.reportValidity();
+      return;
+    }
+    submit.disabled = true;
     try {
-      const result = await invokeSupabaseFunction('employee-account', {
+      await invokeSupabaseFunction('employee-account', {
         action: 'reset_password',
-        user_id: employee.profile_id,
-        password,
+        user_id: form.dataset.employeeId,
+        password: newPassword.value,
       });
-      window.alert(`Temporary password for ${employee.name}:\n\n${result.password}`);
-      await writeChangeLog('Reset employee password', 'Employees', employee.user_id);
+      await writeChangeLog('Reset employee password', 'Employees', form.dataset.employeeRecordId);
+      document.getElementById('resetPasswordModal').classList.add('hidden');
+      showToast('Employee password reset successfully.');
     } catch (error) {
-      showToast(`Password reset failed: ${error.message}`, true);
+      state.textContent = `Password reset failed: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      showToast(state.textContent, true);
     } finally {
-      button.disabled = false;
+      submit.disabled = false;
     }
   });
   document.getElementById('laptopSearch')?.addEventListener('input', renderLaptopTable);

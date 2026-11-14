@@ -501,22 +501,12 @@ h1, h2 {
 }
 
 input, select, textarea {
-  box-sizing: border-box;
-  min-width: 0;
   width: 100%;
   border: 1px solid var(--border);
   background: var(--surface-alt);
   color: var(--text);
   border-radius: 10px;
   padding: 10px 12px;
-}
-
-textarea {
-  resize: vertical;
-}
-
-#issueDescription {
-  resize: none;
 }
 
 .primary-btn {
