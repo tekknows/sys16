@@ -113,7 +113,7 @@ async function invokeSupabaseFunction(functionName, payload) {
       method: 'POST',
     headers: {
         apikey: config.supabaseAnonKey,
-      Authorization: `Bearer ${sessionData.session.access_token}`,
+        Authorization: `Bearer ${sessionData.session.access_token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -321,6 +321,15 @@ function settingValue(key, fallback) {
 }
 
 function renderSettingsForms() {
+  const savedAccent = settingValue('dashboard_accent', readState().accent || '#2563eb');
+  const accentInput = document.getElementById('accentColor');
+  const accentPreview = document.getElementById('accentPreview');
+  if (accentInput) accentInput.value = savedAccent;
+  if (accentPreview) accentPreview.style.background = savedAccent;
+  const currentState = readState();
+  currentState.accent = savedAccent;
+  saveState(currentState);
+  applyTheme(currentState.theme, savedAccent, true);
   const general = document.getElementById('generalSettingsForm');
   if (general) {
     general.elements.companyName.value = settingValue('company_name', 'LOCTIV');
@@ -468,7 +477,10 @@ function renderBlockingTable() {
           <td>${escapeHtml(start)} - ${escapeHtml(end)}</td>
           <td>${escapeHtml(days)}</td>
           <td><span class="status-pill ${status === 'Active' ? 'success' : status === 'Scheduled' ? 'warning' : 'neutral'}">${status}</span></td>
-          <td><button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button></td>
+          <td>
+            <button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button>
+            <button class="text-btn blocking-delete-btn" type="button" data-rule-id="${escapeHtml(row.id)}">Delete</button>
+          </td>
         </tr>
       `;
   }).join('') : '<tr><td colspan="6">No website blocking policies configured.</td></tr>';
@@ -525,23 +537,23 @@ function renderEmployeeTable() {
       const registration = assignment ? getActiveDeviceRegistration(assignment.laptop) : null;
       return `<tr>
         <td>${escapeHtml(row.user_id)}</td>
-        <td><button type="button" class="text-btn view-employee-details" data-employee-id="${escapeHtml(row.id)}">${escapeHtml(row.name)}</button></td>
-        <td>${escapeHtml(row.email)}</td>
         <td>${escapeHtml(assignment?.laptop.laptop_id || 'Unassigned')}</td>
-        <td>${escapeHtml(assignment?.laptop.mac_address || '—')}</td>
+        <td><button type="button" class="text-btn view-employee-details" data-employee-id="${escapeHtml(row.id)}">${escapeHtml(row.name)}</button></td>
+        <td>${escapeHtml(row.department || '—')}</td>
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
-        <td>${escapeHtml(formatDate(assignment?.laptop.last_seen_at || registration?.last_heartbeat_at))}</td>
+        <td>${escapeHtml(row.email)}</td>
         <td>${statusPill(row.active ? (row.account_status || 'Active') : 'Suspended')}</td>
         <td>
           <div class="employee-actions">
             <button type="button" class="icon-btn employee-actions-btn" aria-label="Employee actions" aria-expanded="false" title="Employee actions">⚙</button>
             <div class="employee-action-menu hidden">
               <button type="button" class="text-btn employee-password-btn" data-employee-id="${escapeHtml(row.profile_id)}">Reset password</button>
+              <button type="button" class="text-btn employee-delete-btn" data-employee-id="${escapeHtml(row.profile_id)}">Delete</button>
             </div>
           </div>
         </td>
       </tr>`;
-    }).join('') || '<tr><td colspan="9">No employees found.</td></tr>';
+    }).join('') || '<tr><td colspan="8">No employees found.</td></tr>';
 }
 
 function renderUserRoleAssignments() {
@@ -2075,6 +2087,16 @@ function setupDashboardInteractions() {
           showToast(`Disposal cleanup failed: ${error.message}`, true);
         }
       });
+      document.getElementById('cleanupTerminatedAssignmentsBtn')?.addEventListener('click', async () => {
+        try {
+          const { error } = await getSupabaseClient().from('laptop_assignments').delete().eq('status', 'Terminated');
+          if (error) throw error;
+          await loadDashboardData();
+          showToast('Terminated assignments deleted.');
+        } catch (error) {
+          showToast(`Terminated assignment cleanup failed: ${error.message}`, true);
+        }
+      });
       document.querySelectorAll('.tab-panel').forEach((panel) => {
         panel.classList.toggle('active', panel === target);
       });
@@ -2124,7 +2146,6 @@ function setupDashboardInteractions() {
         days_of_week: days,
         starts_on: null,
         expires_on: null,
-        timezone: formData.get('timezone') || 'Asia/Manila',
         is_active: priorRule?.is_active ?? true,
         created_by: adminUser.id,
       };
@@ -2136,17 +2157,9 @@ function setupDashboardInteractions() {
           let scheduleId = priorRule?.schedule_id;
           if (scheduleId) {
             let scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(scheduleValues).eq('id', scheduleId);
-            if (scheduleQuery.error && /timezone/i.test(scheduleQuery.error.message)) {
-              const { timezone, ...legacyScheduleValues } = scheduleValues;
-              scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(legacyScheduleValues).eq('id', scheduleId);
-            }
             if (scheduleQuery.error) throw scheduleQuery.error;
           } else {
             let scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(scheduleValues).select('id').single();
-            if (scheduleQuery.error && /timezone/i.test(scheduleQuery.error.message)) {
-              const { timezone, ...legacyScheduleValues } = scheduleValues;
-              scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(legacyScheduleValues).select('id').single();
-            }
             if (scheduleQuery.error) throw scheduleQuery.error;
             scheduleId = scheduleQuery.data.id;
           }
@@ -2194,6 +2207,30 @@ function setupDashboardInteractions() {
     });
   }
   document.addEventListener('click', (event) => {
+    const deleteButton = event.target instanceof Element ? event.target.closest('.blocking-delete-btn') : null;
+    if (deleteButton) {
+      const rule = blockingRules.find((row) => row.id === deleteButton.dataset.ruleId);
+      if (!rule || !window.confirm(`Delete the ${rule.domain} blocking policy?`)) return;
+      (async () => {
+        try {
+          const client = getSupabaseClient();
+          const assignmentDelete = await client.from('blocking_schedule_assignments').delete().eq('schedule_id', rule.schedule_id);
+          if (assignmentDelete.error && !/relation|column/i.test(assignmentDelete.error.message)) throw assignmentDelete.error;
+          if (rule.schedule_id) {
+            const scheduleDelete = await client.from('blocking_schedules').delete().eq('id', rule.schedule_id);
+            if (scheduleDelete.error) throw scheduleDelete.error;
+          }
+          const ruleDelete = await client.from('website_blocking_rules').delete().eq('id', rule.id);
+          if (ruleDelete.error) throw ruleDelete.error;
+          await writeChangeLog('Deleted blocking schedule', 'Website blocking', rule.domain);
+          await loadDashboardData();
+          showToast(`${rule.domain} blocking policy deleted.`);
+        } catch (error) {
+          showToast(`Blocking policy deletion failed: ${error.message}`, true);
+        }
+      })();
+      return;
+    }
     const button = event.target instanceof Element ? event.target.closest('.edit-blocking-rule') : null;
     if (!button) return;
     const rule = blockingRules.find((row) => row.id === button.dataset.ruleId);
@@ -2208,7 +2245,6 @@ function setupDashboardInteractions() {
     form.elements.namedItem('targetProfileId').value = rule.target_profile_id || '';
     form.elements.namedItem('startTime').value = String(rule.start_time || '00:00').slice(0, 5);
     form.elements.namedItem('endTime').value = String(rule.end_time || '23:59').slice(0, 5);
-    if (form.elements.namedItem('timezone')) form.elements.namedItem('timezone').value = rule.timezone || 'Asia/Manila';
     form.querySelectorAll('input[name="days"]').forEach((input) => {
       input.checked = (rule.days_of_week || []).includes(input.value);
     });
@@ -2299,6 +2335,26 @@ function setupDashboardInteractions() {
       });
       menu?.classList.toggle('hidden');
       actionsButton.setAttribute('aria-expanded', String(!menu?.classList.contains('hidden')));
+      return;
+    }
+    const deleteButton = event.target.closest('.employee-delete-btn');
+    if (deleteButton) {
+      const employee = directoryEmployees.find((row) => row.profile_id === deleteButton.dataset.employeeId);
+      if (!employee || !window.confirm(`Delete ${employee.name} and their account permanently?`)) return;
+      deleteButton.disabled = true;
+      try {
+        await invokeSupabaseFunction('employee-account', {
+          action: 'delete_employee',
+          user_id: employee.profile_id,
+        });
+        await writeChangeLog('Deleted employee account', 'Employees', employee.user_id);
+        await loadDashboardData();
+        showToast(`Employee ${employee.name} was deleted.`);
+      } catch (error) {
+        showToast(`Employee deletion failed: ${error.message}`, true);
+      } finally {
+        deleteButton.disabled = false;
+      }
       return;
     }
     const button = event.target.closest('.employee-password-btn');
@@ -2648,6 +2704,9 @@ async function initDashboard() {
   monitoringRefreshTimer = window.setInterval(() => {
     refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
   }, 30000);
+  window.setInterval(() => {
+    syncSystem().catch((error) => showToast(`Automatic sync failed: ${error.message}`, true));
+  }, 60000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

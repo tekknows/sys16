@@ -120,6 +120,19 @@ body.dark-mode .brand-panel {
   margin-bottom: 18px;
 }
 
+.sidebar .nav-brand-logo {
+  width: 42px;
+  height: 42px;
+  margin: 0;
+  flex: 0 0 42px;
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .attention-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -471,6 +484,15 @@ textarea,
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
+  transform: rotate(180deg);
+}
+
+.sidebar-toggle[aria-expanded="false"] svg {
+  transform: rotate(0deg);
+}
+
+#saveThemeSettingsBtn {
+  margin-top: 16px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;

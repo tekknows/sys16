@@ -3,7 +3,9 @@ importScripts('config.js');
 const blockRuleIdStart = 1001;
 const extensionSessionKey = 'mindlock-extension-session';
 const policySyncAlarm = 'mindlock-policy-sync';
-const policySyncPeriodMinutes = 0.5;
+const policySyncPeriodMinutes = 1;
+const usageSyncAlarm = 'mindlock-usage-sync';
+const activeUsage = new Map();
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -58,6 +60,62 @@ function normalizeDomain(value) {
 function logBlocking(message, details = {}) {
   console.info(`[LOCTIV BLOCKING] ${message}`, details);
 }
+
+function getTrackedDomain(url) {
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return normalizeDomain(parsed.hostname);
+  } catch {
+    return null;
+  }
+}
+
+async function flushWebsiteUsage() {
+  const session = await getValidExtensionSession();
+  if (!session?.access_token) return;
+  const config = globalThis.MINDLOCK_CONFIG;
+  const now = Date.now();
+  const rows = [...activeUsage.values()]
+    .map((entry) => ({
+      profile_id: session.user.id,
+      domain: entry.domain,
+      visit_count: entry.visitCount,
+      total_seconds: Math.max(0, Math.floor((now - entry.startedAt) / 1000)),
+      bytes_used: 0,
+      recorded_at: new Date(now).toISOString(),
+    }))
+    .filter((row) => row.domain && (row.visit_count || row.total_seconds));
+  if (!rows.length) return;
+  const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_usage_logs`, {
+    method: 'POST',
+    headers: {
+      apikey: config.supabaseAnonKey,
+      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+  if (!response.ok) throw new Error(`Usage synchronization failed (${response.status}).`);
+  activeUsage.clear();
+}
+
+function trackTabVisit(tabId, url) {
+  const domain = getTrackedDomain(url);
+  if (!domain) return;
+  const current = activeUsage.get(tabId);
+  if (current?.domain === domain) return;
+  activeUsage.set(tabId, { domain, startedAt: Date.now(), visitCount: 1 });
+}
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab?.url) trackTabVisit(tabId, tab.url);
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading' && tab.url) trackTabVisit(tabId, tab.url);
+});
 
 async function loadBlockingSchedules(session) {
   const config = globalThis.MINDLOCK_CONFIG;
@@ -222,11 +280,7 @@ async function syncBlockingRules(sessionOverride = null) {
     .map((domain, index) => ({
       id: blockRuleIdStart + index,
       priority: 1,
-<<<<<<< HEAD
-      action: { type: 'redirect', redirect: { extensionPath: `/blocked.html?domain=${encodeURIComponent(domain)}` } },
-=======
       action: { type: 'block' },
->>>>>>> df1b0a0179f8f1b8835c528e9887665a1e30de65
       condition: { requestDomains: [domain], resourceTypes: ['main_frame'] },
     }));
   const installedDomainsBeforeUpdate = managedRules
@@ -288,10 +342,12 @@ const ticketCheckAlarm = 'mindlock-ticket-reply-check';
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
+  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
 });
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
+  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
 });
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
@@ -314,6 +370,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ticketCheckAlarm) checkForTicketReplies();
   if (alarm.name === policySyncAlarm) syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to refresh website blocking rules:', error));
+  if (alarm.name === usageSyncAlarm) flushWebsiteUsage().catch((error) => console.error('[LOCTIV ANALYTICS] Unable to synchronize website usage:', error));
 });
 
 async function getValidExtensionSession() {
@@ -368,7 +425,7 @@ async function checkForTicketReplies() {
     const ticketResponse = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/tickets?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id,ticket_number,status&order=updated_at.desc&limit=50`, {
       headers: {
         apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
-        Authorization: `******`,
+        Authorization: `Bearer ${session.access_token}`,
       },
     });
     if (!ticketResponse.ok) throw new Error(`Ticket status check failed (${ticketResponse.status}).`);

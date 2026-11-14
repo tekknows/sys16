@@ -97,6 +97,16 @@ Deno.serve(async (request) => {
       });
       return jsonResponse({ user_id: userId, password, message: 'Employee password reset.' });
     }
+    if (body.action === 'delete_employee') {
+      const userId = String(body.user_id || '').trim();
+      if (!userId) return jsonResponse({ error: 'A valid employee user is required.' }, 400);
+      await restRequest(config, `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+      await deleteAuthUser(config, userId);
+      return jsonResponse({ user_id: userId, message: 'Employee account deleted.' });
+    }
     if (body.action) return jsonResponse({ error: 'Unsupported employee account action.' }, 400);
     const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
