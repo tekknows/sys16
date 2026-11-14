@@ -20,6 +20,7 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - `supabase/migrations/011_backfill_blocking_schedule_links.sql` — backfill unambiguous schedule links
 - `supabase/migrations/012_ticket_notifications.sql` — notifications for newly submitted employee tickets
 - `supabase/migrations/013_admin_ticket_notifications_and_employee_deletion.sql` — admin ticket update notifications and safe deletion of accounts with ticket history
+- `supabase/migrations/014_allow_ticket_sender_anonymization.sql` — allow profile deletion to anonymize ticket message sender references while preserving immutable message content
 - `supabase/functions/device-registration/` — admin-only device registration and revocation endpoint
 - `supabase/functions/device-heartbeat/` — credential-verified laptop heartbeat endpoint
 - `supabase/functions/employee-account/` — administrator-only employee Auth account and profile creation endpoint
@@ -48,13 +49,14 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Run `supabase/migrations/011_backfill_blocking_schedule_links.sql` after migration 010 to backfill unambiguous domain-to-schedule links without overwriting existing links.
 - Run `supabase/migrations/012_ticket_notifications.sql` to notify administrators and IT staff about new employee tickets.
 - Run `supabase/migrations/013_admin_ticket_notifications_and_employee_deletion.sql` after migration 012 to notify administrators about IT staff updates and allow employee account deletion while retaining ticket history.
+- Run `supabase/migrations/014_allow_ticket_sender_anonymization.sql` after migration 013 so deleting an employee can clear ticket message sender IDs without changing or deleting message content.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js`, the extension, or the Windows agent.
 - Deploy from the project root with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt`. The registration endpoint checks the admin JWT itself; the heartbeat endpoint authenticates the device credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.
 - Redeploy `employee-account` after pulling changes to account creation, deletion, or password reset behavior.
 - If the dashboard reports that the employee-account service could not be reached, run the deployment command from the repository root and confirm the function is available at `https://YOUR-PROJECT.supabase.co/functions/v1/employee-account`. Serve the dashboard from a local web server such as `python -m http.server 8000`, not a `file://` page.
 - Create employee accounts from the admin dashboard after deploying `employee-account`; it creates the Supabase Auth user and matching `profiles`, `employees`, and `user_roles` rows automatically. Create the first administrator account through Supabase Auth, then create its profile and administrator role during initial setup. Do not insert users directly into Supabase's `auth` tables.
-- Employee account deletion retains ticket, message, attachment, assignment, and note history; references to the deleted profile are cleared by migration 013.
+- Employee account deletion retains ticket, message, attachment, assignment, and note history; references to the deleted profile are cleared by migrations 013 and 014.
 - Add the project URL and public anon key to both `admin/config.js` and `extension/config.js`. Never put a Supabase service-role key in the dashboard or extension.
 - Enable the extension for incognito use in the browser's extension settings if the organization's policy requires blocking there; browsers do not allow an extension to silently enable itself in incognito.
 - Apply and verify your Supabase Auth, Storage, and Realtime settings before deployment. Ticket attachments use the private `ticket-attachments` bucket created by migration 003.

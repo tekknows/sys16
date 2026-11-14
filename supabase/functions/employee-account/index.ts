@@ -78,6 +78,13 @@ async function restRequest(
     ) {
       throw new Error('Employee deletion is blocked by ticket attachments. Apply migration 013_admin_ticket_notifications_and_employee_deletion.sql to Supabase, then retry.');
     }
+    if (
+      isRecord(body)
+      && body.code === 'P0001'
+      && body.message === 'Ticket message content is immutable.'
+    ) {
+      throw new Error('Employee deletion requires migration 014_allow_ticket_sender_anonymization.sql so ticket history can be retained without its employee account.');
+    }
     const message = typeof body === 'string' ? body : JSON.stringify(body);
     throw new Error(message || `Database request failed (${response.status}).`);
   }
