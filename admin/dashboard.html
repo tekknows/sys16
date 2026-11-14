@@ -12,14 +12,14 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <div class="brand-block">
-            <img class="brand-logo" src="logo.svg" alt="" />
+            <img class="brand-logo nav-brand-logo" src="logo.svg" alt="LOCTIV" />
             <div>
               <span class="eyebrow">Admin Portal</span>
               <h1>LOCTIV</h1>
             </div>
           </div>
           <button class="sidebar-toggle" id="sidebarToggleBtn" aria-label="Minimize navigation" aria-expanded="true" title="Minimize navigation">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5 16 12 9 19"></path></svg>
           </button>
         </div>
 
@@ -36,7 +36,7 @@
         </nav>
 
         <div class="sidebar-meta">
-          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.2.0">v1.2.0</button>
+          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.2.1">v1.2.1</button>
           <button class="secondary-btn small-btn" id="logoutBtn">Logout</button>
         </div>
       </aside>
@@ -149,13 +149,6 @@
               <label>
                 <span>End time</span>
                 <input name="endTime" type="time" value="17:30" />
-              </label>
-              <label>
-                <span>Timezone</span>
-                <select name="timezone">
-                  <option value="Asia/Manila" selected>Asia/Manila</option>
-                  <option value="UTC">UTC</option>
-                </select>
               </label>
               <div class="span-2 days-field">
                 <span>Days of week</span>
@@ -278,12 +271,11 @@
               <thead>
                 <tr>
                   <th>User ID</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Assigned laptop</th>
-                  <th>MAC address</th>
+                  <th>Laptop ID</th>
+                  <th>Full name</th>
+                  <th>Department</th>
                   <th>Connection</th>
-                  <th>Last seen</th>
+                  <th>Email</th>
                   <th>Account status</th>
                   <th>Edit</th>
                 </tr>
@@ -532,7 +524,7 @@
                     <label class="checkbox-row"><input name="policySyncEnabled" type="checkbox" checked /><span>Policy sync enabled</span></label>
                     <label><span>Disposal laptop cleanup (days)</span><input name="disposalCleanupDays" type="number" min="1" max="3650" value="30" required /></label>
                     <label><span>Assignment retention (days)</span><input name="assignmentRetentionDays" type="number" min="1" max="3650" value="30" required /></label>
-                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save retention settings</button><button type="button" class="secondary-btn" id="cleanupDisposalBtn">Delete disposal laptops</button></div>
+                    <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save retention settings</button><button type="button" class="secondary-btn" id="cleanupDisposalBtn">Delete disposal laptops</button><button type="button" class="secondary-btn" id="cleanupTerminatedAssignmentsBtn">Delete terminated assignments</button></div>
                     <p class="span-2 form-state hidden" id="retentionSettingsState" role="status"></p>
                   </form>
                 </div>
@@ -562,6 +554,18 @@
       <section class="modal-card update-logs-modal-card">
         <div class="card-header"><div><p class="eyebrow">Current release</p><h2 id="updateLogsTitle">Update logs</h2></div><button class="icon-btn" data-close-modal aria-label="Close update logs">×</button></div>
         <div class="update-logs-content">
+         <div class="version-banner"><span>Version</span><strong>1.2.1</strong><time datetime="2026-11-14">November 14, 2026</time></div>
+         <h3>Operations, synchronization, and analytics update</h3>
+         <p>Improves account cleanup, policy enforcement, employee activity reporting, and administrator controls.</p>
+         <ul>
+           <li>Add permanent employee and website-policy deletion actions</li>
+           <li>Add laptop and employee search and status filters</li>
+           <li>Synchronize website time and visit activity every minute</li>
+           <li>Refresh blocking rules automatically and honor the exact schedule end time</li>
+           <li>Add employee ticket notifications for administrators and IT staff</li>
+           <li>Improve theme persistence, navigation controls, and retention cleanup</li>
+         </ul>
+         <hr />
          <div class="version-banner"><span>Version</span><strong>1.2.0</strong><time datetime="2026-11-11">November 11, 2026</time></div>
          <h3>Admin experience update</h3>
          <p>Improves dashboard attention workflows, employee account actions, and login usability.</p>

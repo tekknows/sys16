@@ -106,7 +106,7 @@ async function signOut(updateUi = true) {
   if (extensionSession?.access_token && isSupabaseConfigured()) {
     fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/logout`, {
       method: 'POST',
-      headers: { apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey, Authorization: `Bearer ${extensionSession.access_token}` },
+      headers: { apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey, Authorization: `Bearer ${session.access_token}` },
     }).catch(() => {});
   }
   extensionSession = null;
@@ -244,49 +244,9 @@ async function syncBlockingRulesInBackground() {
 async function loadEmployeeBlockingPolicies() {
   const state = document.getElementById('blockingPolicyState');
   try {
-<<<<<<< HEAD
-    let hasScheduleColumns = true;
-    let hasTargetColumn = true;
-    let rules;
-    while (true) {
-      const columns = [
-        'domain',
-        ...(hasScheduleColumns ? ['start_time', 'end_time', 'days_of_week'] : []),
-        ...(hasTargetColumn ? ['target_profile_id'] : []),
-      ];
-      const query = `website_blocking_rules?is_active=eq.true&select=${columns.join(',')}`;
-      try {
-        rules = await restRequest(query);
-        break;
-      } catch (error) {
-        if (hasScheduleColumns && /start_time|end_time|days_of_week/i.test(error.message)) {
-          hasScheduleColumns = false;
-          continue;
-        }
-        if (hasTargetColumn && /target_profile_id/i.test(error.message)) {
-          hasTargetColumn = false;
-          continue;
-        }
-        throw error;
-      }
-    }
-    const applicableRules = rules
-      .filter((rule) => !rule.target_profile_id || rule.target_profile_id === extensionSession.user.id)
-      .map((rule) => ({
-        ...rule,
-        start_time: rule.start_time || '00:00',
-        end_time: rule.end_time || '23:59',
-        days_of_week: rule.days_of_week || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      }));
-    const activeRules = applicableRules.filter((rule) => isRuleActiveNow(rule));
-    document.getElementById('websiteStatus').textContent = String(activeRules.length);
-    lastPolicySyncAt = Date.now();
-    updateSyncStatus();
-=======
     const syncResult = await syncBlockingRulesInBackground();
     const activeRules = syncResult.activePolicies || [];
     document.getElementById('websiteStatus').textContent = String(syncResult.installedRuleCount);
->>>>>>> df1b0a0179f8f1b8835c528e9887665a1e30de65
     document.getElementById('blockedList').innerHTML = activeRules.map((rule) => (
       `<li>${escapeHtml(rule.domain)} · ${escapeHtml(String(rule.start_time).slice(0, 5))}–${escapeHtml(String(rule.end_time).slice(0, 5))}</li>`
     )).join('');
@@ -510,7 +470,7 @@ async function createSignedAttachmentUrl(path) {
     method: 'POST',
     headers: {
       apikey: config.supabaseAnonKey,
-      Authorization: `******`,
+      Authorization: `Bearer ${session.access_token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ expiresIn: 300 }),
