@@ -525,6 +525,10 @@ input, select, textarea {
   padding: 10px 12px;
 }
 
+#extensionLoginForm input {
+  box-sizing: border-box;
+}
+
 .primary-btn {
   background: var(--accent);
   border: none;
