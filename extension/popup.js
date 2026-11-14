@@ -629,6 +629,15 @@ async function initPopup() {
   setExtensionTheme(theme['mindlock-extension-theme'] || 'light');
   document.getElementById('themeToggle').addEventListener('click', () => setExtensionTheme(employeeTheme === 'dark' ? 'light' : 'dark'));
   document.getElementById('extensionLoginForm').addEventListener('submit', signInEmployee);
+  const passwordInput = document.getElementById('extensionPassword');
+  const passwordToggle = document.getElementById('toggleExtensionPassword');
+  passwordToggle.addEventListener('click', () => {
+    const isHidden = passwordInput.type === 'password';
+    passwordInput.type = isHidden ? 'text' : 'password';
+    passwordToggle.textContent = isHidden ? 'Hide' : 'Show';
+    passwordToggle.setAttribute('aria-pressed', String(isHidden));
+    passwordToggle.setAttribute('aria-label', `${isHidden ? 'Hide' : 'Show'} password`);
+  });
   document.getElementById('issueForm').addEventListener('submit', submitEmployeeTicket);
   document.getElementById('employeeReplyForm').addEventListener('submit', sendEmployeeReply);
   document.getElementById('reloadMyTicketsBtn').addEventListener('click', () => loadMyTickets());
