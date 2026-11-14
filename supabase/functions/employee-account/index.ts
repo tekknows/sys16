@@ -11,6 +11,10 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function getConfig() {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -66,6 +70,14 @@ async function restRequest(
     }
   }
   if (!response.ok) {
+    if (
+      isRecord(body)
+      && body.code === '23503'
+      && typeof body.message === 'string'
+      && body.message.includes('ticket_attachments_uploaded_by_fkey')
+    ) {
+      throw new Error('Employee deletion is blocked by ticket attachments. Apply migration 013_admin_ticket_notifications_and_employee_deletion.sql to Supabase, then retry.');
+    }
     const message = typeof body === 'string' ? body : JSON.stringify(body);
     throw new Error(message || `Database request failed (${response.status}).`);
   }
@@ -81,6 +93,7 @@ Deno.serve(async (request) => {
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed.' }, 405);
 
   let createdUserId: string | null = null;
+  let operation = 'creation';
   try {
     const config = getConfig();
     const admin = await authorizeAdministrator(request, config);
@@ -88,6 +101,7 @@ Deno.serve(async (request) => {
 
     const body = await request.json();
     if (body.action === 'reset_password') {
+      operation = 'password reset';
       const userId = String(body.user_id || '').trim();
       const password = String(body.password || '');
       if (!userId || password.length < 8) return jsonResponse({ error: 'A valid user and password with at least 8 characters are required.' }, 400);
@@ -98,6 +112,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ user_id: userId, password, message: 'Employee password reset.' });
     }
     if (body.action === 'delete_employee') {
+      operation = 'deletion';
       const userId = String(body.user_id || '').trim();
       if (!userId) return jsonResponse({ error: 'A valid employee user is required.' }, 400);
       await restRequest(config, `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
@@ -163,7 +178,7 @@ Deno.serve(async (request) => {
         console.error('Employee account cleanup failed:', cleanupError);
       }
     }
-    console.error('Employee account creation failed:', error);
-    return jsonResponse({ error: error instanceof Error ? error.message : 'Employee account creation failed.' }, 400);
+    console.error(`Employee account ${operation} failed:`, error);
+    return jsonResponse({ error: error instanceof Error ? error.message : `Employee account ${operation} failed.` }, 400);
   }
 });
