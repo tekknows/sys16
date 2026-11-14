@@ -61,7 +61,13 @@ function logBlocking(message, details = {}) {
 
 async function loadBlockingSchedules(session) {
   const config = globalThis.MINDLOCK_CONFIG;
-  const headers = { apikey: config.supabaseAnonKey, Authorization: `******` };
+  if (!session?.access_token) {
+    throw new Error('The employee session does not contain an access token.');
+  }
+  const headers = {
+    apikey: config.supabaseAnonKey,
+    Authorization: `Bearer ${session.access_token}`,
+  };
   const request = async (path) => {
     const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/${path}`, { headers });
     if (!response.ok) throw new Error(await response.text());
