@@ -390,7 +390,7 @@ async function openEmployeeTicket(ticketId) {
     <h3>${escapeHtml(activeTicket.ticket_number)} · ${escapeHtml(activeTicket.subject)}</h3>
     <p>${escapeHtml(activeTicket.description)}</p>
     <p class="ticket-detail-meta">${escapeHtml(activeTicket.issue_category)} · ${escapeHtml(activeTicket.status)} · ${escapeHtml(activeTicket.priority || 'Normal')}</p>`;
-  document.getElementById('reopenTicketBtn').classList.toggle('hidden', activeTicket.status !== 'Resolved');
+  renderEmployeeTicketActions();
   await loadEmployeeConversation();
   if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
   ticketRealtimeTimer = setInterval(loadEmployeeConversation, 10000);
@@ -457,7 +457,22 @@ async function refreshEmployeeTicketStatus() {
   if (rows.length) {
     activeTicket.status = rows[0].status;
     activeTicket.updated_at = rows[0].updated_at;
-    document.getElementById('reopenTicketBtn').classList.toggle('hidden', activeTicket.status !== 'Resolved');
+    renderEmployeeTicketActions();
+  }
+}
+
+function renderEmployeeTicketActions() {
+  const closed = activeTicket?.status === 'Closed';
+  document.getElementById('employeeReplyForm').classList.toggle('hidden', closed);
+  document.getElementById('reopenTicketBtn').classList.toggle('hidden', activeTicket?.status !== 'Resolved');
+  const meta = document.querySelector('#employeeTicketInfo .ticket-detail-meta');
+  if (meta && activeTicket) {
+    meta.textContent = `${activeTicket.issue_category} · ${activeTicket.status} · ${activeTicket.priority || 'Normal'}`;
+  }
+  if (closed) {
+    const state = document.getElementById('employeeConversationState');
+    state.textContent = 'This ticket is closed. Replies and attachments are disabled.';
+    state.classList.remove('hidden', 'error-text');
   }
 }
 
@@ -509,6 +524,10 @@ async function createSignedAttachmentUrl(path) {
 async function sendEmployeeReply(event) {
   event.preventDefault();
   if (!activeTicket) return;
+  if (activeTicket.status === 'Closed') {
+    renderEmployeeTicketActions();
+    return;
+  }
   const input = document.getElementById('employeeReplyInput');
   const fileInput = document.getElementById('employeeReplyFile');
   const file = fileInput.files[0];

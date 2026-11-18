@@ -1,5 +1,5 @@
 const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
-const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.2.0';
+const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.2.2';
 
 const TICKET_PAGE_SIZE = 10;
 const TICKET_STATUSES = ['Open', 'In Progress', 'Waiting for Employee', 'Waiting for IT', 'Resolved', 'Closed'];
@@ -297,21 +297,6 @@ function renderMetricCards() {
   `).join('');
 }
 
-function renderDashboardAttention() {
-  const summary = document.getElementById('dashboardAttentionSummary');
-  const detail = document.getElementById('dashboardAttentionDetail');
-  if (!summary || !detail) return;
-  const urgentTickets = ticketsOnPage.filter((ticket) => ticket.priority === 'Urgent' && !['Resolved', 'Closed'].includes(ticket.status)).length;
-  const disposalLaptops = directoryLaptops.filter((laptop) => laptop.status === 'Retired').length;
-  const pending = changeRequests.filter((request) => request.status === 'Pending').length;
-  const issues = [];
-  if (urgentTickets) issues.push(`${urgentTickets} urgent ticket${urgentTickets === 1 ? '' : 's'}`);
-  if (pending) issues.push(`${pending} pending change request${pending === 1 ? '' : 's'}`);
-  if (disposalLaptops) issues.push(`${disposalLaptops} disposal laptop${disposalLaptops === 1 ? '' : 's'}`);
-  summary.textContent = issues.length ? issues.join(' · ') : 'No urgent tickets or defective laptops';
-  detail.textContent = issues.length ? 'Review these items from the relevant dashboard sections.' : 'Everything is up to date.';
-}
-
 function settingValue(key, fallback) {
   const setting = getSystemSetting(key, fallback);
   if (setting && typeof setting === 'object') {
@@ -353,6 +338,7 @@ function renderSettingsForms() {
     retention.elements.policySyncEnabled.checked = settingValue('policy_sync_enabled', true);
     retention.elements.disposalCleanupDays.value = settingValue('disposal_laptop_cleanup_days', 30);
     retention.elements.assignmentRetentionDays.value = settingValue('assignment_retention_days', 30);
+    retention.elements.analyticsRetentionDays.value = settingValue('analytics_retention_days', 90);
   }
   const incognito = document.getElementById('incognitoSettingsForm');
   if (incognito) incognito.querySelector('#incognitoToggle').checked = settingValue('global_incognito_policy', false);
@@ -372,7 +358,7 @@ function renderNotifications() {
   const markup = notifications.length
     ? notifications.map((item) => `
       <li class="${item.is_read ? '' : 'unread-notification'}">
-        <button type="button" class="notification-item" data-notification-id="${escapeHtml(item.id)}" ${item.is_read ? '' : 'aria-label="Mark notification as read"'}>
+        <button type="button" class="notification-item" data-notification-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(item.link?.toLowerCase().includes('ticket') ? 'Open ticket from notification' : 'Mark notification as read')}">
           <strong>${escapeHtml(item.title)}</strong>
           <small>${escapeHtml(item.body)}</small>
           <time>${escapeHtml(formatDate(item.created_at))}</time>
@@ -387,26 +373,91 @@ function renderBarChart() {
   const usageChart = document.getElementById('usageChart');
   if (!usageChart) return;
 
-  const data = analyticsRecords.length
-    ? Array.from({ length: 7 }, (_, index) => {
-      const day = new Date();
-      day.setDate(day.getDate() - (6 - index));
-      const dateKey = day.toISOString().slice(0, 10);
-      return analyticsRecords.filter((row) => String(row.recorded_at).slice(0, 10) === dateKey)
-        .reduce((sum, row) => sum + Number(row.total_seconds || 0) / 60, 0);
-    })
-    : Array(7).fill(0);
+  const dailyUsage = new Map();
+  getSelectedAnalyticsRecords(analyticsRecords).forEach((row) => {
+    const dateKey = new Date(row.recorded_at).toISOString().slice(0, 10);
+    dailyUsage.set(dateKey, (dailyUsage.get(dateKey) || 0) + Number(row.total_seconds || 0) / 60);
+  });
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(today);
+    day.setUTCDate(day.getUTCDate() - (6 - index));
+    return day;
+  });
+  const data = days.map((day) => dailyUsage.get(day.toISOString().slice(0, 10)) || 0);
   const max = Math.max(...data, 1);
   usageChart.innerHTML = data
     .map(
       (value, index) => `
         <div class="bar-group">
-          <span style="height:${Math.max(value ? (value / max) * 100 : 0, 2)}%" title="${value} minutes"></span>
-          <small>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.now() - (6 - index) * 86400000).getDay()]}</small>
+          <span style="height:${Math.max(value ? (value / max) * 100 : 0, 2)}%" title="${value.toFixed(1)} minutes"></span>
+          <small>${formatAnalyticsDay(days[index])}</small>
         </div>
       `,
     )
     .join('');
+}
+
+function formatAnalyticsDay(date) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
+function formatUsageDuration(seconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function getSelectedAnalyticsRecords(records) {
+  const employeeId = document.getElementById('analyticsEmployeeFilter')?.value || '';
+  return employeeId ? records.filter((row) => row.employee_id === employeeId) : records;
+}
+
+function renderAnalyticsEmployeeFilter() {
+  const select = document.getElementById('analyticsEmployeeFilter');
+  if (!select) return;
+  const selectedId = select.value;
+  select.innerHTML = '<option value="">All employees</option>' + directoryEmployees
+    .map((employee) => `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.userId)})</option>`)
+    .join('');
+  if (directoryEmployees.some((employee) => employee.id === selectedId)) select.value = selectedId;
+  renderAnalyticsData(analyticsRecords);
+  renderBarChart();
+}
+
+function renderAnalyticsWebsiteTable(records) {
+  const table = document.getElementById('analyticsWebsiteTable');
+  if (!table) return;
+  const employees = new Map(directoryEmployees.map((employee) => [employee.id, employee.name]));
+  const totals = new Map();
+  records.forEach((row) => {
+    const employeeId = row.employee_id || row.profile_id || '';
+    const key = `${employeeId}\u0000${row.domain}`;
+    const total = totals.get(key) || {
+      employeeId,
+      employeeName: employees.get(employeeId) || 'Unknown employee',
+      domain: row.domain,
+      seconds: 0,
+      bytes: 0,
+      visits: 0,
+    };
+    total.seconds += Number(row.total_seconds) || 0;
+    total.bytes += Number(row.bytes_used) || 0;
+    total.visits += Number(row.visit_count) || 0;
+    totals.set(key, total);
+  });
+  table.innerHTML = [...totals.values()]
+    .sort((a, b) => b.seconds - a.seconds || b.bytes - a.bytes)
+    .map((row) => `<tr>
+      <td>${escapeHtml(row.employeeName)}</td>
+      <td>${escapeHtml(row.domain || 'Unknown website')}</td>
+      <td>${formatUsageDuration(row.seconds)}</td>
+      <td>${(row.bytes / (1024 * 1024)).toFixed(2)} MB</td>
+      <td>${row.visits}</td>
+    </tr>`)
+    .join('') || '<tr><td colspan="5">No website usage was recorded for this selection in the last 7 days.</td></tr>';
 }
 
 function escapeHtml(value) {
@@ -596,7 +647,7 @@ function renderLaptopTable() {
         <td>${escapeHtml(assignment?.employee.name || 'Unassigned')}</td>
         <td>${escapeHtml(assignment?.employee.user_id || '—')}</td>
         <td>${escapeHtml(row.mac_address || registration?.mac_address || '—')}</td>
-        <td>${escapeHtml(registration?.registration_id || row.device_registration_id || '—')}</td>
+        <td>${escapeHtml(registration?.registration_id || '—')}</td>
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
         <td>${statusPill(registration ? 'Registered' : 'Unregistered')}</td>
         <td>${escapeHtml(formatDate(registration ? registration.last_heartbeat_at : row.last_seen_at))}</td>
@@ -604,9 +655,7 @@ function renderLaptopTable() {
         <td class="laptop-actions">
           <button type="button" class="text-btn view-laptop-details" data-laptop-id="${escapeHtml(row.id)}">View</button>
           <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
-          ${registration
-            ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>`
-            : `<button type="button" class="text-btn register-device" data-laptop-id="${escapeHtml(row.id)}"${assignment ? '' : ' disabled title="Assign an active employee before registering this device."'}>Register</button>`}
+          ${registration ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>` : ''}
           <button type="button" class="text-btn connection-history-laptop" data-laptop-id="${escapeHtml(row.id)}">History</button>
         </td>
       </tr>`;
@@ -750,7 +799,7 @@ async function loadDashboardData() {
       client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at,ended_at,expires_at').order('assigned_at', { ascending: false }),
       client.from('laptop_change_requests').select('id,profile_id,request_type,reason,status,created_at').order('created_at', { ascending: false }).limit(100),
       client.from('change_logs').select('id,action,module_name,created_at').order('created_at', { ascending: false }).limit(8),
-      client.from('notifications').select('id,title,body,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
+      client.from('notifications').select('id,title,body,link,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
       client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
       client.from('device_connection_logs').select('id,laptop_id,employee_id,device_registration_id,connection_started_at,connection_ended_at,last_heartbeat_at,connection_status,recorded_at').order('recorded_at', { ascending: false }).limit(500),
       client.from('system_settings').select('setting_key,setting_value'),
@@ -789,6 +838,7 @@ async function loadDashboardData() {
         role: roles.get(employee.profile_id) || 'Employee',
       };
     });
+    renderAnalyticsEmployeeFilter();
     const targetEmployeeSelect = document.getElementById('blockingTargetEmployee');
     if (targetEmployeeSelect) {
       const selectedProfileId = targetEmployeeSelect.value;
@@ -803,6 +853,21 @@ async function loadDashboardData() {
       document.getElementById('blockingTargetHelp').textContent = blockingTargetSchemaReady
         ? 'Choose one employee or leave this set to All employees.'
         : 'Run migration 006_blocking_rule_employee_targets.sql to enable specific employee targeting.';
+    }
+    const bulkTargetSelect = document.getElementById('bulkBlockingTargetEmployee');
+    if (bulkTargetSelect) {
+      const selectedProfileId = bulkTargetSelect.value;
+      const eligibleEmployees = directoryEmployees.filter((employee) => employee.active);
+      bulkTargetSelect.innerHTML = '<option value="">All employees</option>' + eligibleEmployees.map((employee) => (
+        `<option value="${escapeHtml(employee.profile_id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
+      )).join('');
+      if (eligibleEmployees.some((employee) => employee.profile_id === selectedProfileId)) {
+        bulkTargetSelect.value = selectedProfileId;
+      }
+      bulkTargetSelect.disabled = !blockingScheduleSchemaReady;
+      document.getElementById('bulkBlockingTargetHelp').textContent = blockingScheduleSchemaReady
+        ? 'Choose one employee or leave this set to All employees.'
+        : 'Run the database schedule migrations before creating bulk schedules.';
     }
     directoryLaptops = laptopResult.data || [];
     const employeesById = new Map(directoryEmployees.map((employee) => [employee.id, employee]));
@@ -827,7 +892,6 @@ async function loadDashboardData() {
     notifications = notificationResult.data || [];
     renderSettingsForms();
     renderMetricCards();
-    renderDashboardAttention();
     renderActivityList();
     renderNotifications();
     renderBlockingTable();
@@ -904,7 +968,7 @@ async function openNotifications() {
   renderNotifications();
   try {
     const { data, error } = await getSupabaseClient().from('notifications')
-      .select('id,title,body,is_read,created_at')
+      .select('id,title,body,link,is_read,created_at')
       .eq('user_id', adminUser.id)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -933,6 +997,25 @@ async function markNotificationsRead(ids) {
   ));
   renderNotifications();
   updateNotificationBell();
+}
+
+async function openNotificationTicket(notificationId) {
+  const notification = notifications.find((item) => item.id === notificationId);
+  if (!notification) return false;
+  await markNotificationsRead([notificationId]);
+  if (!notification.link || !notification.link.toLowerCase().includes('ticket')) return false;
+  const ticketNumber = String(notification.body || '').match(/\b[A-Z][A-Z0-9]*-\d+\b/i)?.[0];
+  if (!ticketNumber) return false;
+  const { data: ticket, error } = await getSupabaseClient().from('tickets')
+    .select('id,ticket_number,profile_id,employee_id,laptop_id,subject,issue_category,priority,assigned_to,status,description,created_at,updated_at,profile:profiles!tickets_profile_id_fkey(full_name,email),employee:employees!tickets_employee_id_fkey(user_id),laptop:laptops!tickets_laptop_id_fkey(laptop_id,device_registration_id,model),assigned_staff:profiles!tickets_assigned_to_fkey(full_name)')
+    .eq('ticket_number', ticketNumber)
+    .maybeSingle();
+  if (error) throw error;
+  if (!ticket) throw new Error(`Ticket ${ticketNumber} could not be found.`);
+  document.getElementById('notificationsModal')?.classList.add('hidden');
+  setActiveSection('tickets');
+  await openTicketDetail(ticket.id, ticket);
+  return true;
 }
 
 async function writeChangeLog(action, moduleName, recordId = null, previousValue = null, newValue = null) {
@@ -1007,6 +1090,7 @@ function formatDate(value) {
 }
 
 function getActiveDeviceRegistration(laptop) {
+  if (!getActiveLaptopAssignment(laptop.id)) return null;
   return deviceRegistrations.find((registration) => (
     registration.laptop_id === laptop.id && registration.is_active
   )) || null;
@@ -1100,7 +1184,6 @@ async function loadTickets() {
     ticketCount = 0;
     ticketStatusCounts = {};
     renderTicketTable();
-    renderDashboardAttention();
     renderTicketLegend();
     setTicketListState('Connect Supabase in admin/config.js and sign in to load tickets.');
     updateTicketPagination();
@@ -1323,8 +1406,8 @@ function closeTicketDetail() {
   loadTickets();
 }
 
-async function openTicketDetail(ticketId) {
-  const ticket = ticketsOnPage.find((row) => row.id === ticketId);
+async function openTicketDetail(ticketId, ticketRecord = null) {
+  const ticket = ticketRecord || ticketsOnPage.find((row) => row.id === ticketId);
   if (!ticket) return;
   selectedTicket = ticket;
   document.getElementById('ticketListView').classList.add('hidden');
@@ -1469,18 +1552,25 @@ async function loadAnalyticsData() {
   }
   state.textContent = 'Loading analytics…';
   const since = new Date();
-  since.setDate(since.getDate() - 6);
-  since.setHours(0, 0, 0, 0);
-  const { data, error } = await client.from('website_usage_logs')
-    .select('domain,visit_count,total_seconds,bytes_used,recorded_at')
-    .gte('recorded_at', since.toISOString())
-    .order('recorded_at', { ascending: true });
-  if (error) {
-    state.textContent = `Could not load analytics: ${error.message}`;
-    state.classList.add('error-text');
-    return;
+  since.setUTCHours(0, 0, 0, 0);
+  since.setUTCDate(since.getUTCDate() - 6);
+  const records = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client.from('website_usage_logs')
+      .select('id,employee_id,profile_id,domain,visit_count,total_seconds,bytes_used,recorded_at')
+      .gte('recorded_at', since.toISOString())
+      .order('recorded_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) {
+      state.textContent = `Could not load analytics: ${error.message}`;
+      state.classList.add('error-text');
+      return;
+    }
+    records.push(...(data || []));
+    if (!data || data.length < 1000) break;
   }
-  analyticsRecords = data || [];
+  analyticsRecords = records;
   state.classList.remove('error-text');
   renderAnalyticsData(analyticsRecords);
   renderBarChart();
@@ -1492,30 +1582,39 @@ function renderAnalyticsData(records) {
   const sites = document.getElementById('topSitesList');
   const state = document.getElementById('analyticsState');
   const title = document.getElementById('analyticsChartTitle');
+  const visibleRecords = getSelectedAnalyticsRecords(records);
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
   const labels = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
-    date.setHours(0, 0, 0, 0);
+    const date = new Date(today);
+    date.setUTCDate(date.getUTCDate() - (6 - index));
     return date;
   });
+  const recordsByDay = new Map();
+  visibleRecords.forEach((row) => {
+    const dateKey = new Date(row.recorded_at).toISOString().slice(0, 10);
+    const daily = recordsByDay.get(dateKey) || [];
+    daily.push(row);
+    recordsByDay.set(dateKey, daily);
+  });
   const byDay = labels.map((date) => {
-    const dateKey = date.toLocaleDateString();
-    const rows = records.filter((row) => new Date(row.recorded_at).toLocaleDateString() === dateKey);
+    const rows = recordsByDay.get(date.toISOString().slice(0, 10)) || [];
     return {
-      label: date.toLocaleDateString(undefined, { weekday: 'short' }),
+      label: formatAnalyticsDay(date),
       time: rows.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0),
       data: rows.reduce((sum, row) => sum + (Number(row.bytes_used) || 0), 0) / (1024 * 1024),
       visits: rows.reduce((sum, row) => sum + (Number(row.visit_count) || 0), 0),
     };
   });
-  const timeTotal = records.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0);
-  const mbTotal = records.reduce((sum, row) => sum + (Number(row.bytes_used) || 0), 0) / (1024 * 1024);
-  const uniqueSites = new Set(records.map((row) => row.domain).filter(Boolean)).size;
+  const timeTotal = visibleRecords.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0);
+  const mbTotal = visibleRecords.reduce((sum, row) => sum + (Number(row.bytes_used) || 0), 0) / (1024 * 1024);
+  const uniqueSites = new Set(visibleRecords.map((row) => row.domain).filter(Boolean)).size;
   stats.innerHTML = [
     { label: 'Time spent', value: `${(timeTotal / 3600).toFixed(1)} h`, trend: 'last 7 days' },
-    { label: 'Data usage', value: `${mbTotal.toFixed(1)} MB`, trend: 'last 7 days' },
+    { label: 'Data usage', value: `${mbTotal.toFixed(2)} MB`, trend: 'last 7 days' },
     { label: 'Unique websites', value: String(uniqueSites), trend: 'last 7 days' },
   ].map((item) => `<article class="stat-card"><span class="metric-label">${item.label}</span><strong class="metric-value">${item.value}</strong><span class="metric-trend positive">${item.trend}</span></article>`).join('');
+  renderAnalyticsWebsiteTable(visibleRecords);
   const metric = analyticsMetric === 'data' ? 'data' : analyticsMetric === 'sites' ? 'visits' : 'time';
   const metricTitle = analyticsMetric === 'data' ? 'Data usage (MB)' : analyticsMetric === 'sites' ? 'Website visits' : 'Website time spent';
   title.textContent = metricTitle;
@@ -1523,10 +1622,10 @@ function renderAnalyticsData(records) {
   chart.classList.toggle('hidden', analyticsMetric === 'sites');
   if (analyticsMetric === 'sites') {
     const rankedSites = new Map();
-    records.forEach((row) => rankedSites.set(row.domain, (rankedSites.get(row.domain) || 0) + (Number(row.visit_count) || 0)));
+    visibleRecords.forEach((row) => rankedSites.set(row.domain, (rankedSites.get(row.domain) || 0) + (Number(row.visit_count) || 0)));
     sites.innerHTML = [...rankedSites.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
       .map(([domain, visits]) => `<li><span class="dot"></span><span>${escapeHtml(domain)} — ${visits} visits</span></li>`).join('');
-    state.textContent = records.length ? '' : 'No usage records were reported in the last 7 days.';
+    state.textContent = visibleRecords.length ? '' : 'No usage records were reported for this selection in the last 7 days.';
   } else {
     const max = Math.max(...byDay.map((row) => row[metric]), 0);
     chart.innerHTML = byDay.map((row) => {
@@ -1535,9 +1634,9 @@ function renderAnalyticsData(records) {
       const displayValue = analyticsMetric === 'data' ? `${value.toFixed(1)} MB` : `${(value / 3600).toFixed(1)} h`;
       return `<div class="graph-column"><span class="graph-value">${displayValue}</span><div class="graph-track"><i style="height:${height}%"></i></div><small>${row.label}</small></div>`;
     }).join('');
-    state.textContent = records.length ? '' : 'No usage records were reported in the last 7 days.';
+    state.textContent = visibleRecords.length ? '' : 'No usage records were reported for this selection in the last 7 days.';
   }
-  state.classList.toggle('hidden', Boolean(records.length));
+  state.classList.toggle('hidden', Boolean(visibleRecords.length));
 }
 
 async function syncSystem() {
@@ -1620,6 +1719,18 @@ function setupDashboardInteractions() {
   document.querySelectorAll('.nav-link[data-section]').forEach((button) => {
     button.addEventListener('click', () => setActiveSection(button.dataset.section));
   });
+  document.querySelectorAll('[data-blocking-tab]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('[data-blocking-tab]').forEach((item) => {
+        const active = item === tab;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('[data-blocking-panel]').forEach((panel) => {
+        panel.classList.toggle('active', panel.dataset.blockingPanel === tab.dataset.blockingTab);
+      });
+    });
+  });
 
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
@@ -1690,7 +1801,7 @@ function setupDashboardInteractions() {
         'Employee ID': assignment?.employee.user_id || '—',
         'Employee email': assignment?.employee.email || '—',
         'MAC address': laptop.mac_address || registration?.mac_address || '—',
-        'Device ID': registration?.registration_id || laptop.device_registration_id || '—',
+        'Device ID': registration?.registration_id || '—',
         'Connection status': getDeviceConnectionStatus(registration),
         'Registration status': registration ? 'Registered' : 'Unregistered',
         'Last seen': formatDate(registration ? registration.last_heartbeat_at : laptop.last_seen_at),
@@ -1717,39 +1828,6 @@ function setupDashboardInteractions() {
       document.getElementById('connectionLaptopFilter').value = laptop.id;
       renderConnectionHistory();
       document.getElementById('connectionHistoryModal').classList.remove('hidden');
-      return;
-    }
-    if (button.classList.contains('register-device')) {
-      if (!getActiveLaptopAssignment(laptop.id)) {
-        showToast('Assign this laptop to an active employee before registering it.', true);
-        return;
-      }
-      button.disabled = true;
-      const message = document.getElementById('deviceRegistrationMessage');
-      const modal = document.getElementById('deviceRegistrationModal');
-      message.textContent = 'Registering device securely…';
-      message.classList.remove('error-text');
-      modal.classList.remove('hidden');
-      try {
-        const result = await invokeSupabaseFunction('device-registration', {
-          action: 'register',
-          laptop_id: laptop.id,
-          mac_address: laptop.mac_address || null,
-        });
-        const deviceIdText = result.device_id ? ` Device ID: ${result.device_id}.` : '';
-        message.textContent = `${result.message || 'Device registered.'}${deviceIdText}`;
-        try {
-          await writeChangeLog('Registered device', 'Laptops', laptop.laptop_id);
-        } catch (logError) {
-          showToast(`Device registered, but its activity log failed: ${logError.message}`, true);
-        }
-        await loadDashboardData();
-      } catch (error) {
-        message.textContent = `Device registration failed: ${error.message}`;
-        message.classList.add('error-text');
-      } finally {
-        button.disabled = false;
-      }
       return;
     }
     if (button.classList.contains('revoke-device')) {
@@ -1832,7 +1910,7 @@ function setupDashboardInteractions() {
     const item = event.target instanceof Element ? event.target.closest('.notification-item') : null;
     if (!item) return;
     try {
-      await markNotificationsRead([item.dataset.notificationId]);
+      await openNotificationTicket(item.dataset.notificationId);
     } catch (error) {
       const state = document.getElementById('notificationsModalState');
       state.textContent = `Notification could not be marked as read: ${error.message}`;
@@ -1843,9 +1921,9 @@ function setupDashboardInteractions() {
   document.getElementById('notificationList')?.addEventListener('click', async (event) => {
     const item = event.target instanceof Element ? event.target.closest('.notification-item') : null;
     if (!item) return;
-    document.getElementById('notificationsModal')?.classList.remove('hidden');
     try {
-      await markNotificationsRead([item.dataset.notificationId]);
+      const openedTicket = await openNotificationTicket(item.dataset.notificationId);
+      if (!openedTicket) document.getElementById('notificationsModal')?.classList.remove('hidden');
     } catch (error) {
       showToast(`Notification could not be marked as read: ${error.message}`, true);
     }
@@ -2068,6 +2146,7 @@ function setupDashboardInteractions() {
         message_auto_cleanup: form.elements.messageAutoCleanup.checked,
         resolved_ticket_cleanup_days: Number(form.elements.ticketCleanupDays.value),
         retention_history_days: Number(form.elements.historyRetentionDays.value),
+        analytics_retention_days: Number(form.elements.analyticsRetentionDays.value),
         keep_messages_indefinitely: form.elements.keepMessagesIndefinitely.checked,
         policy_sync_enabled: form.elements.policySyncEnabled.checked,
         disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
@@ -2215,6 +2294,72 @@ function setupDashboardInteractions() {
       }
     });
   }
+  document.getElementById('bulkScheduleForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const state = document.getElementById('bulkScheduleState');
+    const submit = form.querySelector('button[type="submit"]');
+    const domains = [...new Set(String(form.elements.domains.value)
+      .split(/[\s,;]+/)
+      .map((value) => value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
+      .filter(Boolean))];
+    const days = [...form.querySelectorAll('input[name="days"]:checked')].map((input) => input.value);
+    const domainPattern = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+    const startTime = form.elements.startTime.value;
+    const endTime = form.elements.endTime.value;
+    const lunchStart = form.elements.lunchStart.value;
+    const lunchEnd = form.elements.lunchEnd.value;
+    state.classList.add('hidden');
+    if (!domains.length || domains.some((domain) => !domainPattern.test(domain))) {
+      state.textContent = 'Enter valid domain names only (for example, facebook.com and youtube.com).';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    if (!days.length) {
+      state.textContent = 'Select at least one day for this schedule.';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    if (!(startTime < lunchStart && lunchStart < lunchEnd && lunchEnd < endTime)) {
+      state.textContent = 'Set the times in order: work start, lunch start, lunch end, then work end. Overnight work schedules are not supported for lunch breaks.';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    submit.disabled = true;
+    try {
+      const { data, error } = await getSupabaseClient().rpc('create_bulk_blocking_schedules', {
+        p_domains: domains,
+        p_target_profile_id: form.elements.targetProfileId.value || null,
+        p_start_time: startTime,
+        p_end_time: endTime,
+        p_lunch_start: lunchStart,
+        p_lunch_end: lunchEnd,
+        p_days: days,
+      });
+      if (error) throw error;
+      const target = directoryEmployees.find((employee) => employee.profile_id === form.elements.targetProfileId.value);
+      state.textContent = `Created ${Number(data) || domains.length} bulk schedules for ${target ? target.name : 'all employees'}. Websites are allowed during lunch and blocked before and after it.`;
+      state.classList.remove('hidden', 'error-text');
+      form.elements.domains.value = '';
+      await loadDashboardData();
+      try {
+        await writeChangeLog('Created bulk work-hours blocking schedule', 'Website Blocking', domains.join(', '));
+      } catch (error) {
+        console.error('[LOCTIV AUDIT] Bulk blocking schedule was created but could not be logged:', error);
+        state.textContent += ' The schedule was created, but the audit log could not be saved.';
+        state.classList.add('error-text');
+      }
+    } catch (error) {
+      state.textContent = `Bulk schedule could not be saved: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    } finally {
+      submit.disabled = false;
+    }
+  });
   document.addEventListener('click', (event) => {
     const deleteButton = event.target instanceof Element ? event.target.closest('.blocking-delete-btn') : null;
     if (deleteButton) {
@@ -2249,6 +2394,7 @@ function setupDashboardInteractions() {
     }
     const form = document.getElementById('scheduleForm');
     setActiveSection('blocking');
+    document.querySelector('[data-blocking-tab="single"]')?.click();
     form.elements.namedItem('ruleId').value = rule.id;
     form.elements.namedItem('domain').value = rule.domain;
     form.elements.namedItem('targetProfileId').value = rule.target_profile_id || '';
@@ -2280,22 +2426,47 @@ function setupDashboardInteractions() {
         setDashboardState('Assignment retention must be between 1 and 3650 days.', true);
         return;
       }
+      const submitButton = assignmentForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
       try {
-        const { error } = await getSupabaseClient().rpc('assign_laptop_to_employee', {
-          p_employee_id: employee.id,
-          p_laptop_id: laptop.id,
-          p_assigned_by: adminUser.id,
-          p_retention_days: retentionDays,
-        });
-        if (error) throw error;
-        await writeChangeLog('Assigned or reassigned laptop', 'Assignments', laptop.laptop_id);
+        try {
+          const { error } = await getSupabaseClient().rpc('assign_laptop_to_employee', {
+            p_employee_id: employee.id,
+            p_laptop_id: laptop.id,
+            p_assigned_by: adminUser.id,
+            p_retention_days: retentionDays,
+          });
+          if (error) throw error;
+        } catch (error) {
+          const needsMigration = /assign_laptop_to_employee/i.test(error.message);
+          setDashboardState(needsMigration
+            ? `Laptop assignment failed: run migration 007_device_registration_monitoring.sql first. ${error.message}`
+            : `Laptop assignment failed: ${error.message}`, true);
+          return;
+        }
+        let registrationError = null;
+        try {
+          await invokeSupabaseFunction('device-registration', {
+            action: 'register',
+            laptop_id: laptop.id,
+            mac_address: laptop.mac_address || null,
+          });
+        } catch (error) {
+          registrationError = error;
+        }
+        let activityError = null;
+        try {
+          await writeChangeLog('Assigned or reassigned laptop', 'Assignments', laptop.laptop_id);
+        } catch (error) {
+          activityError = error;
+        }
         await loadDashboardData();
-        setDashboardState(`Laptop ${laptop.laptop_id} assigned to ${employee.name}. Previous assignments remain in history.`);
-      } catch (error) {
-        const needsMigration = /assign_laptop_to_employee/i.test(error.message);
-        setDashboardState(needsMigration
-          ? `Laptop assignment failed: run migration 007_device_registration_monitoring.sql first. ${error.message}`
-          : `Laptop assignment failed: ${error.message}`, true);
+        const statusMessage = registrationError
+          ? `Laptop ${laptop.laptop_id} was assigned to ${employee.name}, but device registration failed and remains Unregistered: ${registrationError.message}`
+          : `Laptop ${laptop.laptop_id} assigned to ${employee.name} and registered automatically. Previous assignments remain in history.`;
+        setDashboardState(activityError ? `${statusMessage} Activity log failed: ${activityError.message}` : statusMessage, Boolean(registrationError || activityError));
+      } finally {
+        submitButton.disabled = false;
       }
     });
   }
@@ -2529,6 +2700,10 @@ function setupDashboardInteractions() {
       });
       renderAnalyticsData(analyticsRecords);
     });
+  });
+  document.getElementById('analyticsEmployeeFilter')?.addEventListener('change', () => {
+    renderAnalyticsData(analyticsRecords);
+    renderBarChart();
   });
   document.getElementById('syncSystemBtn')?.addEventListener('click', syncSystem);
 

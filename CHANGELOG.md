@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.12 - November 19, 2026
+
+- Open tickets from admin notifications and prevent employee replies or attachments after closure.
+- Register a laptop automatically when it is assigned, and show unassigned devices as unregistered.
+- Organize single and bulk website schedules in tabs and remove the dashboard Needs attention card.
+
+## 1.2.11 - November 18, 2026
+
+- Added per-employee website usage reporting for time spent, visits, and browser-reported transfer size.
+- Persisted extension usage tracking across service-worker restarts and attributed records to the signed-in employee.
+- Added bulk website schedules that allow access during configured lunch hours.
+- Added database validation and employee attribution for website usage records.
+
 ## 1.2.1 - November 14, 2026
 
 - Added permanent employee and website-policy deletion actions.

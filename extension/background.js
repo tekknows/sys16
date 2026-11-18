@@ -7,7 +7,13 @@ const policySyncPeriodMinutes = 1;
 const usageSyncAlarm = 'mindlock-usage-sync';
 const heartbeatAlarm = 'mindlock-extension-heartbeat';
 const heartbeatStatusKey = 'mindlock-extension-heartbeat-status';
+const usageTrackingStorageKey = 'mindlock-website-usage-tracking';
 const activeUsage = new Map();
+let nextUsageEntryId = 0;
+let usageStateLoaded = false;
+let usageStateLoading = null;
+let usageSaveQueue = Promise.resolve();
+let focusedWindowId = null;
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -74,49 +80,246 @@ function getTrackedDomain(url) {
 }
 
 async function flushWebsiteUsage() {
+  await ensureUsageStateLoaded();
   const session = await getValidExtensionSession();
   if (!session?.access_token) return;
   const config = globalThis.MINDLOCK_CONFIG;
   const now = Date.now();
-  const rows = [...activeUsage.values()]
-    .map((entry) => ({
+  const headers = {
+    apikey: config.supabaseAnonKey,
+    Authorization: `Bearer ${session.access_token}`,
+  };
+  const employeeResponse = await fetch(
+    `${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/employees?profile_id=eq.${encodeURIComponent(session.user.id)}&active=eq.true&select=id&limit=1`,
+    { headers },
+  );
+  if (!employeeResponse.ok) throw new Error(`Employee analytics attribution failed (${employeeResponse.status}).`);
+  const employees = await employeeResponse.json();
+  const employeeId = employees[0]?.id;
+  if (!employeeId) throw new Error('No active employee record is linked to the signed-in profile.');
+
+  const pendingEntries = [...activeUsage.entries()];
+  const rows = pendingEntries
+    .map(([, entry]) => ({
+      entry,
       profile_id: session.user.id,
+      employee_id: employeeId,
       domain: entry.domain,
       visit_count: entry.visitCount,
-      total_seconds: Math.max(0, Math.floor((now - entry.startedAt) / 1000)),
-      bytes_used: 0,
-      recorded_at: new Date(now).toISOString(),
+      total_seconds: Math.max(0, entry.secondsPending + (entry.startedAt === null ? 0 : Math.floor((now - entry.startedAt) / 1000))),
+      bytes_used: entry.bytesUsed,
     }))
-    .filter((row) => row.domain && (row.visit_count || row.total_seconds));
+    .filter((row) => row.domain && (row.visit_count || row.total_seconds || row.bytes_used));
   if (!rows.length) return;
   const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_usage_logs`, {
     method: 'POST',
     headers: {
-      apikey: config.supabaseAnonKey,
-      Authorization: `Bearer ${session.access_token}`,
+      ...headers,
       'Content-Type': 'application/json',
       Prefer: 'return=minimal',
     },
-    body: JSON.stringify(rows),
+    body: JSON.stringify(rows.map(({ entry, ...row }) => row)),
   });
   if (!response.ok) throw new Error(`Usage synchronization failed (${response.status}).`);
-  activeUsage.clear();
+  rows.forEach(({ entry }) => {
+    for (const [entryId, current] of activeUsage) {
+      if (current !== entry) continue;
+      current.secondsPending = 0;
+      current.visitCount = 0;
+      current.bytesUsed = 0;
+      if (current.startedAt !== null) current.startedAt = now;
+      if (current.closed || current.ended) activeUsage.delete(entryId);
+      break;
+    }
+  });
+  await saveUsageState();
 }
 
-function trackTabVisit(tabId, url) {
+async function ensureUsageStateLoaded() {
+  if (usageStateLoaded) return;
+  if (!usageStateLoading) {
+    usageStateLoading = (async () => {
+      const saved = await chrome.storage.local.get(usageTrackingStorageKey);
+      const entries = saved[usageTrackingStorageKey];
+      if (Array.isArray(entries)) {
+        entries.forEach(([entryId, entry]) => {
+          if (!Number.isInteger(entryId) || !entry || !Number.isInteger(entry.tabId) || !entry.domain) return;
+          activeUsage.set(entryId, entry);
+          nextUsageEntryId = Math.max(nextUsageEntryId, entryId);
+        });
+      }
+      usageStateLoaded = true;
+    })().finally(() => {
+      usageStateLoading = null;
+    });
+  }
+  await usageStateLoading;
+}
+
+function saveUsageState() {
+  if (!usageStateLoaded) return Promise.reject(new Error('Usage tracking state has not been loaded.'));
+  const snapshot = [...activeUsage.entries()];
+  usageSaveQueue = usageSaveQueue
+    .catch((error) => console.error('[LOCTIV ANALYTICS] Previous usage-state save failed:', error))
+    .then(() => chrome.storage.local.set({ [usageTrackingStorageKey]: snapshot }));
+  return usageSaveQueue;
+}
+
+async function hasExtensionUsageSession() {
+  const saved = await chrome.storage.local.get(extensionSessionKey);
+  const session = saved[extensionSessionKey];
+  return Boolean(session?.access_token && session?.user?.id);
+}
+
+function stopUsageEntry(entry, stoppedAt = Date.now()) {
+  if (entry.startedAt !== null) {
+    entry.secondsPending += Math.max(0, Math.floor((stoppedAt - entry.startedAt) / 1000));
+    entry.startedAt = null;
+  }
+}
+
+function getOpenUsageEntry(tabId) {
+  return [...activeUsage.values()].find((entry) => entry.tabId === tabId && entry.current && !entry.closed);
+}
+
+function trackTabVisit(tabId, url, windowId) {
   const domain = getTrackedDomain(url);
   if (!domain) return;
-  const current = activeUsage.get(tabId);
-  if (current?.domain === domain) return;
-  activeUsage.set(tabId, { domain, startedAt: Date.now(), visitCount: 1 });
+  const now = Date.now();
+  const current = getOpenUsageEntry(tabId);
+  if (current?.domain === domain) {
+    current.windowId = windowId ?? current.windowId;
+    if (current.startedAt === null) current.startedAt = now;
+    return;
+  }
+  if (current) {
+    stopUsageEntry(current, now);
+    current.current = false;
+    current.ended = true;
+  }
+  const entryId = ++nextUsageEntryId;
+  activeUsage.set(entryId, {
+    tabId,
+    windowId,
+    domain,
+    startedAt: now,
+    secondsPending: 0,
+    visitCount: 1,
+    bytesUsed: 0,
+    closed: false,
+    current: true,
+    ended: false,
+  });
 }
 
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (tab?.url) trackTabVisit(tabId, tab.url);
+chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  try {
+    await ensureUsageStateLoaded();
+    if (!await hasExtensionUsageSession()) return;
+    if (await getFocusedWindowId() !== windowId) return;
+    const now = Date.now();
+    activeUsage.forEach((entry) => {
+      if (entry.windowId === windowId && entry.tabId !== tabId) stopUsageEntry(entry, now);
+    });
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.url) trackTabVisit(tabId, tab.url, windowId);
+    await saveUsageState();
+  } catch (error) {
+    console.error('[LOCTIV ANALYTICS] Could not update active tab tracking:', error);
+  }
 });
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'loading' && tab.url) trackTabVisit(tabId, tab.url);
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'loading' || !tab.active || !tab.url) return;
+  try {
+    await ensureUsageStateLoaded();
+    if (!await hasExtensionUsageSession()) return;
+    if (await getFocusedWindowId() !== tab.windowId) return;
+    trackTabVisit(tabId, tab.url, tab.windowId);
+    await saveUsageState();
+  } catch (error) {
+    console.error('[LOCTIV ANALYTICS] Could not record active website navigation:', error);
+  }
+});
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  try {
+    await ensureUsageStateLoaded();
+    const entry = getOpenUsageEntry(tabId);
+    if (!entry) return;
+    stopUsageEntry(entry);
+    entry.closed = true;
+    entry.current = false;
+    await saveUsageState();
+  } catch (error) {
+    console.error('[LOCTIV ANALYTICS] Could not finish tracking a closed tab:', error);
+  }
+});
+async function trackActiveTabs() {
+  await ensureUsageStateLoaded();
+  if (!await hasExtensionUsageSession()) return;
+  const windowId = await getFocusedWindowId();
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  const tabs = await chrome.tabs.query({ active: true, windowId });
+  tabs.forEach((tab) => {
+    if (Number.isInteger(tab.id) && tab.url) trackTabVisit(tab.id, tab.url, tab.windowId);
+  });
+  await saveUsageState();
+}
+async function getFocusedWindowId() {
+  if (focusedWindowId === null) {
+    const window = await chrome.windows.getLastFocused();
+    focusedWindowId = window.id;
+  }
+  return focusedWindowId;
+}
+async function initializeUsageAfterBrowserStart() {
+  await ensureUsageStateLoaded();
+  activeUsage.forEach((entry) => {
+    entry.startedAt = null;
+  });
+  await saveUsageState();
+  await trackActiveTabs();
+}
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  try {
+    await ensureUsageStateLoaded();
+    const now = Date.now();
+    focusedWindowId = windowId;
+    activeUsage.forEach((entry) => {
+      if (entry.windowId !== windowId) stopUsageEntry(entry, now);
+    });
+    if (windowId !== chrome.windows.WINDOW_ID_NONE) {
+      if (await hasExtensionUsageSession()) {
+        const tabs = await chrome.tabs.query({ active: true, windowId });
+        tabs.forEach((tab) => {
+          if (Number.isInteger(tab.id) && tab.url) trackTabVisit(tab.id, tab.url, windowId);
+        });
+      }
+    }
+    await saveUsageState();
+  } catch (error) {
+    console.error('[LOCTIV ANALYTICS] Could not update focused-window tracking:', error);
+  }
+});
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'usage-bytes') return false;
+  const tabId = sender.tab?.id;
+  const bytes = Number(message.bytes);
+  if (!Number.isInteger(tabId) || !Number.isFinite(bytes) || bytes <= 0) {
+    sendResponse({ ok: false });
+    return false;
+  }
+  ensureUsageStateLoaded()
+    .then(async () => {
+      const entry = getOpenUsageEntry(tabId);
+      if (entry) entry.bytesUsed += Math.floor(bytes);
+      await saveUsageState();
+      sendResponse({ ok: Boolean(entry) });
+    })
+    .catch((error) => {
+      console.error('[LOCTIV ANALYTICS] Could not record browser transfer size:', error);
+      sendResponse({ ok: false });
+    });
+  return true;
 });
 
 async function loadBlockingSchedules(session) {
@@ -346,6 +549,8 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
   chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+  trackActiveTabs()
+    .catch((error) => console.error('[LOCTIV ANALYTICS] Could not initialize active tab tracking:', error));
   sendExtensionHeartbeat();
 });
 chrome.runtime.onStartup.addListener(() => {
@@ -353,17 +558,36 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
   chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+  initializeUsageAfterBrowserStart()
+    .catch((error) => console.error('[LOCTIV ANALYTICS] Could not restore browser usage tracking:', error));
   sendExtensionHeartbeat();
 });
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[extensionSessionKey]) {
-    if (changes[extensionSessionKey].newValue?.access_token) {
+    const previousProfileId = changes[extensionSessionKey].oldValue?.user?.id;
+    const nextSession = changes[extensionSessionKey].newValue;
+    if (nextSession?.access_token) {
+      if (previousProfileId !== nextSession.user?.id) {
+        ensureUsageStateLoaded()
+          .then(() => {
+            activeUsage.clear();
+            return saveUsageState();
+          })
+          .then(() => trackActiveTabs())
+          .catch((error) => console.error('[LOCTIV ANALYTICS] Could not reset usage tracking for the signed-in employee:', error));
+      }
       chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
       sendExtensionHeartbeat();
     } else {
       chrome.alarms.clear(heartbeatAlarm);
+      ensureUsageStateLoaded()
+        .then(() => {
+          activeUsage.clear();
+          return saveUsageState();
+        })
+        .catch((error) => console.error('[LOCTIV ANALYTICS] Could not clear usage data after sign-out:', error));
     }
     syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to update website blocking rules:', error));
   }
