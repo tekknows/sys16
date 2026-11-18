@@ -10,10 +10,19 @@ let lastPolicySyncAt = null;
 let employeeTheme = 'light';
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type !== 'extension-heartbeat-success' || !assignedDevice || !message.received_at) return;
-  assignedDevice.last_seen_at = message.received_at;
-  updateDeviceStatus();
+  if (message?.type === 'extension-heartbeat-success' && assignedDevice && message.received_at) {
+    assignedDevice.last_seen_at = message.received_at;
+    updateDeviceStatus();
+  }
+  if (message?.type === 'extension-heartbeat-status') renderHeartbeatStatus(message.status);
 });
+
+function renderHeartbeatStatus(status) {
+  const help = document.getElementById('heartbeatConnectionHelp');
+  if (!help || !status?.message) return;
+  help.textContent = status.message;
+  help.classList.toggle('error-text', status.state === 'error');
+}
 
 function isSupabaseConfigured() {
   return Boolean(globalThis.MINDLOCK_CONFIG?.supabaseUrl && globalThis.MINDLOCK_CONFIG?.supabaseAnonKey);
@@ -160,6 +169,8 @@ async function loadAssignedDevice() {
       ? [assignedDevice.manufacturer, assignedDevice.model].filter(Boolean).join(' ') || assignedDevice.device_name || assignedDevice.operating_system || '—'
       : '—';
     updateDeviceStatus();
+    const heartbeatState = await extensionStorageGet('mindlock-extension-heartbeat-status');
+    renderHeartbeatStatus(heartbeatState['mindlock-extension-heartbeat-status']);
   } catch (error) {
     document.getElementById('endpointDevice').textContent = 'Unavailable';
     document.getElementById('endpointModel').textContent = '—';

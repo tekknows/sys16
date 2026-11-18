@@ -6,6 +6,7 @@ const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 1;
 const usageSyncAlarm = 'mindlock-usage-sync';
 const heartbeatAlarm = 'mindlock-extension-heartbeat';
+const heartbeatStatusKey = 'mindlock-extension-heartbeat-status';
 const activeUsage = new Map();
 
 function isScheduleActive(rule, now = new Date()) {
@@ -390,6 +391,7 @@ async function sendExtensionHeartbeat() {
     const session = await getValidExtensionSession();
     if (!session?.access_token) {
       await chrome.alarms.clear(heartbeatAlarm);
+      await setHeartbeatStatus('offline', 'Sign in to LOCTIV to connect this device.');
       return;
     }
 
@@ -404,28 +406,46 @@ async function sendExtensionHeartbeat() {
       `${restUrl}/employees?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id&limit=1`,
       { headers },
     );
-    if (!employeeResponse.ok) return;
+    if (!employeeResponse.ok) {
+      await setHeartbeatStatus('error', `Could not verify the employee account (HTTP ${employeeResponse.status}). Sign in again or contact IT.`);
+      return;
+    }
     const employees = await employeeResponse.json();
     const employeeId = employees[0]?.id;
-    if (!employeeId) return;
+    if (!employeeId) {
+      await setHeartbeatStatus('offline', 'This sign-in is not linked to an employee record.');
+      return;
+    }
 
     const assignmentResponse = await fetch(
       `${restUrl}/laptop_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&status=eq.Active&select=laptop_id&limit=1`,
       { headers },
     );
-    if (!assignmentResponse.ok) return;
+    if (!assignmentResponse.ok) {
+      await setHeartbeatStatus('error', `Could not load the laptop assignment (HTTP ${assignmentResponse.status}). Check employee access and database policies.`);
+      return;
+    }
     const assignments = await assignmentResponse.json();
     const laptopId = assignments[0]?.laptop_id;
-    if (!laptopId) return;
+    if (!laptopId) {
+      await setHeartbeatStatus('offline', 'No active laptop is assigned to this employee. Ask an administrator to assign one.');
+      return;
+    }
 
     const laptopResponse = await fetch(
       `${restUrl}/laptops?id=eq.${encodeURIComponent(laptopId)}&active=eq.true&select=device_registration_id&limit=1`,
       { headers },
     );
-    if (!laptopResponse.ok) return;
+    if (!laptopResponse.ok) {
+      await setHeartbeatStatus('error', `Could not load the registered laptop (HTTP ${laptopResponse.status}). Check employee access and database policies.`);
+      return;
+    }
     const laptops = await laptopResponse.json();
     const registrationId = laptops[0]?.device_registration_id;
-    if (!registrationId) return;
+    if (!registrationId) {
+      await setHeartbeatStatus('offline', 'The assigned laptop is not registered yet. Ask an administrator to register it.');
+      return;
+    }
 
     const heartbeatResponse = await fetch(
       `${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/extension-heartbeat`,
@@ -446,19 +466,35 @@ async function sendExtensionHeartbeat() {
     );
     if (!heartbeatResponse.ok) {
       const result = await heartbeatResponse.json().catch(() => ({}));
-      if (heartbeatResponse.status === 401 || heartbeatResponse.status === 403) {
-        console.warn('[LOCTIV HEARTBEAT] Authentication or laptop assignment rejected:', result.error || heartbeatResponse.status);
-      }
+      const message = heartbeatResponse.status === 404
+        ? 'The Supabase extension-heartbeat function is not deployed. Ask IT to deploy it.'
+        : heartbeatResponse.status === 401
+          ? 'Your LOCTIV sign-in expired. Sign out and sign in again.'
+          : heartbeatResponse.status === 403
+            ? result.error || 'This laptop is not actively assigned to this employee.'
+            : heartbeatResponse.status === 502
+              ? 'The heartbeat could not be saved. Ask IT to apply migration 015 and check the Supabase function logs.'
+              : result.error || `The heartbeat endpoint returned HTTP ${heartbeatResponse.status}.`;
+      await setHeartbeatStatus('error', message);
+      console.warn('[LOCTIV HEARTBEAT] Heartbeat rejected:', message);
       return;
     }
     const result = await heartbeatResponse.json();
+    await setHeartbeatStatus('online', 'Connected. The latest heartbeat was received by LOCTIV.');
     chrome.runtime.sendMessage({
       type: 'extension-heartbeat-success',
       received_at: result.received_at,
     }).catch(() => {});
   } catch (error) {
+    await setHeartbeatStatus('error', 'Could not reach LOCTIV. Check this device’s internet connection; the extension will retry.');
     console.warn('[LOCTIV HEARTBEAT] Heartbeat failed; the next alarm will retry:', error.message || error);
   }
+}
+
+async function setHeartbeatStatus(state, message) {
+  const status = { state, message, checked_at: new Date().toISOString() };
+  await chrome.storage.local.set({ [heartbeatStatusKey]: status });
+  chrome.runtime.sendMessage({ type: 'extension-heartbeat-status', status }).catch(() => {});
 }
 
 async function getValidExtensionSession() {
