@@ -170,7 +170,7 @@ function updateDeviceStatus() {
   const endpointStatus = document.getElementById('endpointStatus');
   const lastSeen = assignedDevice?.last_seen_at ? new Date(assignedDevice.last_seen_at).getTime() : NaN;
   const age = Date.now() - lastSeen;
-  const isOnline = Number.isFinite(lastSeen) && age >= 0 && age <= 3 * 60 * 1000;
+  const isOnline = Number.isFinite(lastSeen) && age >= 0 && age <= 2 * 60 * 1000;
   connectionStatus.textContent = !assignedDevice ? 'Not assigned' : isOnline ? 'Online' : 'Offline';
   connectionStatus.classList.toggle('is-offline', !isOnline);
   endpointStatus.textContent = assignedDevice && assignedDevice.active !== false ? 'Active' : 'Inactive';

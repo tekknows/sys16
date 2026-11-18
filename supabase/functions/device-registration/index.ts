@@ -99,7 +99,7 @@ Deno.serve(async (request) => {
     return jsonResponse({
       device_id: registrationId,
       credential,
-      message: 'Registration created. Configure the authorized Windows monitoring agent with this device ID and credential.',
+      message: 'Registration created. The employee Chrome/Edge extension will use this registration ID for authenticated heartbeats.',
     });
   } catch (error) {
     console.error('Device registration request failed:', error);

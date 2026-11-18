@@ -5,6 +5,7 @@ const extensionSessionKey = 'mindlock-extension-session';
 const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 1;
 const usageSyncAlarm = 'mindlock-usage-sync';
+const heartbeatAlarm = 'mindlock-extension-heartbeat';
 const activeUsage = new Map();
 
 function isScheduleActive(rule, now = new Date()) {
@@ -343,16 +344,26 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
   chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+  sendExtensionHeartbeat();
 });
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
   chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+  sendExtensionHeartbeat();
 });
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[extensionSessionKey]) {
+    if (changes[extensionSessionKey].newValue?.access_token) {
+      chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+      sendExtensionHeartbeat();
+    } else {
+      chrome.alarms.clear(heartbeatAlarm);
+    }
     syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to update website blocking rules:', error));
   }
 });
@@ -371,7 +382,78 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ticketCheckAlarm) checkForTicketReplies();
   if (alarm.name === policySyncAlarm) syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to refresh website blocking rules:', error));
   if (alarm.name === usageSyncAlarm) flushWebsiteUsage().catch((error) => console.error('[LOCTIV ANALYTICS] Unable to synchronize website usage:', error));
+  if (alarm.name === heartbeatAlarm) sendExtensionHeartbeat();
 });
+
+async function sendExtensionHeartbeat() {
+  try {
+    const session = await getValidExtensionSession();
+    if (!session?.access_token) {
+      await chrome.alarms.clear(heartbeatAlarm);
+      return;
+    }
+
+    const config = globalThis.MINDLOCK_CONFIG;
+    const headers = {
+      apikey: config.supabaseAnonKey,
+      Authorization: `Bearer ${session.access_token}`,
+    };
+    const restUrl = `${config.supabaseUrl.replace(/\/$/, '')}/rest/v1`;
+
+    const employeeResponse = await fetch(
+      `${restUrl}/employees?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id&limit=1`,
+      { headers },
+    );
+    if (!employeeResponse.ok) return;
+    const employees = await employeeResponse.json();
+    const employeeId = employees[0]?.id;
+    if (!employeeId) return;
+
+    const assignmentResponse = await fetch(
+      `${restUrl}/laptop_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&status=eq.Active&select=laptop_id&limit=1`,
+      { headers },
+    );
+    if (!assignmentResponse.ok) return;
+    const assignments = await assignmentResponse.json();
+    const laptopId = assignments[0]?.laptop_id;
+    if (!laptopId) return;
+
+    const laptopResponse = await fetch(
+      `${restUrl}/laptops?id=eq.${encodeURIComponent(laptopId)}&active=eq.true&select=device_registration_id&limit=1`,
+      { headers },
+    );
+    if (!laptopResponse.ok) return;
+    const laptops = await laptopResponse.json();
+    const registrationId = laptops[0]?.device_registration_id;
+    if (!registrationId) return;
+
+    const heartbeatResponse = await fetch(
+      `${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/extension-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: config.supabaseAnonKey,
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          employee_id: employeeId,
+          laptop_id: laptopId,
+          device_registration_id: registrationId,
+          extension_version: chrome.runtime.getManifest().version,
+        }),
+      },
+    );
+    if (!heartbeatResponse.ok) {
+      const result = await heartbeatResponse.json().catch(() => ({}));
+      if (heartbeatResponse.status === 401 || heartbeatResponse.status === 403) {
+        console.warn('[LOCTIV HEARTBEAT] Authentication or laptop assignment rejected:', result.error || heartbeatResponse.status);
+      }
+    }
+  } catch (error) {
+    console.warn('[LOCTIV HEARTBEAT] Heartbeat failed; the next alarm will retry:', error.message || error);
+  }
+}
 
 async function getValidExtensionSession() {
   const stored = await chrome.storage.local.get(extensionSessionKey);

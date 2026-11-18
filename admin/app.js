@@ -11,6 +11,7 @@ let ticketsOnPage = [];
 let selectedTicket = null;
 let ticketRealtimeChannel = null;
 let ticketListRealtimeChannel = null;
+let monitoringRealtimeChannel = null;
 let ticketPollTimer = null;
 let analyticsMetric = 'time';
 let analyticsRecords = [];
@@ -1014,7 +1015,8 @@ function getActiveDeviceRegistration(laptop) {
 function getDeviceConnectionStatus(registration) {
   if (!registration) return 'Unregistered';
   if (!registration.last_heartbeat_at) return 'Not Connected';
-  return Date.now() - new Date(registration.last_heartbeat_at).getTime() <= 3 * 60 * 1000
+  const age = Date.now() - new Date(registration.last_heartbeat_at).getTime();
+  return age >= 0 && age <= 2 * 60 * 1000
     ? 'Online'
     : 'Offline';
 }
@@ -1559,6 +1561,22 @@ async function syncSystem() {
   }
 }
 
+function setupMonitoringRealtime() {
+  if (!supabaseClient || monitoringRealtimeChannel) return;
+  monitoringRealtimeChannel = supabaseClient
+    .channel('admin-device-monitoring')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'laptops' }, () => {
+      refreshDeviceMonitoring().catch(() => {});
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_registrations' }, () => {
+      refreshDeviceMonitoring().catch(() => {});
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_connection_logs' }, () => {
+      refreshDeviceMonitoring().catch(() => {});
+    })
+    .subscribe();
+}
+
 function setupTicketListRealtime() {
   if (!supabaseClient || ticketListRealtimeChannel) return;
   ticketListRealtimeChannel = supabaseClient
@@ -1741,7 +1759,7 @@ function setupDashboardInteractions() {
           laptop_id: laptop.id,
           mac_address: laptop.mac_address || null,
         });
-        message.textContent = `${result.message} Device ID: ${result.device_id}. Configure the authorized Windows agent promptly; this credential is shown only once.`;
+        message.textContent = `${result.message} Device ID: ${result.device_id}. This registration credential is shown only once.`;
         credentialInput.value = result.credential;
         credentialField.classList.remove('hidden');
         copyButton.classList.remove('hidden');
@@ -2716,6 +2734,7 @@ async function initDashboard() {
     document.getElementById('updateLogsModal')?.classList.remove('hidden');
   }
   setupTicketListRealtime();
+  setupMonitoringRealtime();
   await Promise.all([loadDashboardData(), loadTickets(), loadAnalyticsData()]);
   if (monitoringRefreshTimer) window.clearInterval(monitoringRefreshTimer);
   monitoringRefreshTimer = window.setInterval(() => {
