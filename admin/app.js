@@ -1736,7 +1736,8 @@ function setupDashboardInteractions() {
           laptop_id: laptop.id,
           mac_address: laptop.mac_address || null,
         });
-        message.textContent = `${result.message} Device ID: ${result.device_id}`;
+        const deviceIdText = result.device_id ? ` Device ID: ${result.device_id}.` : '';
+        message.textContent = `${result.message || 'Device registered.'}${deviceIdText}`;
         try {
           await writeChangeLog('Registered device', 'Laptops', laptop.laptop_id);
         } catch (logError) {
