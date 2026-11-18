@@ -448,42 +448,40 @@ async function sendExtensionHeartbeat() {
     }
 
     const heartbeatResponse = await fetch(
-      `${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/extension-heartbeat`,
+      `${restUrl}/rpc/record_authenticated_extension_heartbeat`,
       {
         method: 'POST',
         headers: {
-          apikey: config.supabaseAnonKey,
-          Authorization: `Bearer ${session.access_token}`,
+          ...headers,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          employee_id: employeeId,
-          laptop_id: laptopId,
-          device_registration_id: registrationId,
-          extension_version: chrome.runtime.getManifest().version,
+          p_employee_id: employeeId,
+          p_laptop_id: laptopId,
+          p_registration_id: registrationId,
+          p_extension_version: chrome.runtime.getManifest().version,
         }),
       },
     );
     if (!heartbeatResponse.ok) {
       const result = await heartbeatResponse.json().catch(() => ({}));
+      const databaseMessage = result.message || result.error || '';
       const message = heartbeatResponse.status === 404
-        ? 'The Supabase extension-heartbeat function is not deployed. Ask IT to deploy it.'
-        : heartbeatResponse.status === 401
-          ? 'Your LOCTIV sign-in expired. Sign out and sign in again.'
-          : heartbeatResponse.status === 403
-            ? result.error || 'This laptop is not actively assigned to this employee.'
-            : heartbeatResponse.status === 502
-              ? 'The heartbeat could not be saved. Ask IT to apply migration 015 and check the Supabase function logs.'
-              : result.error || `The heartbeat endpoint returned HTTP ${heartbeatResponse.status}.`;
+        ? 'The authenticated heartbeat RPC is unavailable. Ask IT to apply migration 016_authenticated_extension_heartbeats.sql.'
+        : heartbeatResponse.status === 401 || /permission denied for function/i.test(databaseMessage)
+          ? 'The heartbeat RPC is not enabled for employee accounts. Ask IT to apply migration 016_authenticated_extension_heartbeats.sql.'
+          : /not actively assigned|mismatched|invalid or revoked/i.test(databaseMessage)
+            ? databaseMessage
+            : result.error || databaseMessage || `The heartbeat RPC returned HTTP ${heartbeatResponse.status}.`;
       await setHeartbeatStatus('error', message);
       console.warn('[LOCTIV HEARTBEAT] Heartbeat rejected:', message);
       return;
     }
-    const result = await heartbeatResponse.json();
+    const receivedAt = await heartbeatResponse.json();
     await setHeartbeatStatus('online', 'Connected. The latest heartbeat was received by LOCTIV.');
     chrome.runtime.sendMessage({
       type: 'extension-heartbeat-success',
-      received_at: result.received_at,
+      received_at: receivedAt,
     }).catch(() => {});
   } catch (error) {
     await setHeartbeatStatus('error', 'Could not reach LOCTIV. Check this device’s internet connection; the extension will retry.');
