@@ -537,6 +537,11 @@ textarea,
   white-space: nowrap;
 }
 
+.philippines-clock {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .sync-icon {
   display: inline-block;
   margin-right: 4px;

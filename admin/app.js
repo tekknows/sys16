@@ -1,5 +1,7 @@
 const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
 const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.2.2';
+const PHILIPPINES_TIMEZONE = 'Asia/Manila';
+const PHILIPPINES_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 const TICKET_PAGE_SIZE = 10;
 const TICKET_STATUSES = ['Open', 'In Progress', 'Waiting for Employee', 'Waiting for IT', 'Resolved', 'Closed'];
@@ -30,8 +32,14 @@ let blockingScheduleLinkReady = true;
 let blockingTargetSchemaReady = true;
 let ticketStatusCounts = {};
 let monitoringRefreshTimer = null;
+let monitoringRefreshTimeout = null;
 let deviceMonitoringSchemaReady = false;
 let systemSettings = {};
+let analyticsRealtimeChannel = null;
+let analyticsRefreshTimer = null;
+let analyticsRefreshTimeout = null;
+let analyticsLoadInProgress = false;
+let analyticsRefreshPending = false;
 
 function normalizeBlockingDays(value) {
   const values = Array.isArray(value) ? value : String(value || '').split(/[,\s]+/);
@@ -62,7 +70,7 @@ function isBlockingScheduleActiveNow(row, now = new Date()) {
   if (overnight && beforeEnd && !afterStart) scheduleDate.setUTCDate(scheduleDate.getUTCDate() - 1);
   const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
   if (!days.some((value) => value.toLowerCase() === day.toLowerCase())) return false;
-  const date = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
+  const date = `${scheduleDate.getUTCFullYear()}-${String(scheduleDate.getUTCMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getUTCDate()).padStart(2, '0')}`;
   return (!row.starts_on || date >= row.starts_on) && (!row.expires_on || date <= row.expires_on);
 }
 
@@ -85,6 +93,37 @@ function getBlockingZonedClock(date, timezone) {
     day: Number(values.day),
     time: `${values.hour}:${values.minute}`,
   };
+}
+
+function getPhilippinesDateKey(date) {
+  const parts = getBlockingZonedClock(date, PHILIPPINES_TIMEZONE);
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+function getPhilippinesDayKeys(date = new Date()) {
+  const parts = getBlockingZonedClock(date, PHILIPPINES_TIMEZONE);
+  const day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  return Array.from({ length: 7 }, (_, index) => {
+    const currentDay = new Date(day);
+    currentDay.setUTCDate(currentDay.getUTCDate() - (6 - index));
+    return currentDay.toISOString().slice(0, 10);
+  });
+}
+
+function getPhilippinesStartOfDay(date = new Date()) {
+  const [year, month, day] = getPhilippinesDateKey(date).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day) - PHILIPPINES_UTC_OFFSET_MS);
+}
+
+function updatePhilippinesClock() {
+  const clock = document.getElementById('philippinesClock');
+  if (!clock) return;
+  const now = new Date();
+  clock.textContent = `Philippine time: ${new Intl.DateTimeFormat('en-PH', {
+    timeZone: PHILIPPINES_TIMEZONE,
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(now)}`;
 }
 
 function isSupabaseConfigured() {
@@ -319,7 +358,7 @@ function renderSettingsForms() {
   const general = document.getElementById('generalSettingsForm');
   if (general) {
     general.elements.companyName.value = settingValue('company_name', 'LOCTIV');
-    general.elements.timezone.value = settingValue('timezone', 'UTC');
+    general.elements.timezone.value = PHILIPPINES_TIMEZONE;
     general.elements.notificationPreference.value = settingValue('notification_preferences', 'Email + In-app');
   }
   const ticket = document.getElementById('ticketSettingsForm');
@@ -375,17 +414,11 @@ function renderBarChart() {
 
   const dailyUsage = new Map();
   getSelectedAnalyticsRecords(analyticsRecords).forEach((row) => {
-    const dateKey = new Date(row.recorded_at).toISOString().slice(0, 10);
+    const dateKey = getPhilippinesDateKey(new Date(row.recorded_at));
     dailyUsage.set(dateKey, (dailyUsage.get(dateKey) || 0) + Number(row.total_seconds || 0) / 60);
   });
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const day = new Date(today);
-    day.setUTCDate(day.getUTCDate() - (6 - index));
-    return day;
-  });
-  const data = days.map((day) => dailyUsage.get(day.toISOString().slice(0, 10)) || 0);
+  const days = getPhilippinesDayKeys();
+  const data = days.map((day) => dailyUsage.get(day) || 0);
   const max = Math.max(...data, 1);
   usageChart.innerHTML = data
     .map(
@@ -399,8 +432,9 @@ function renderBarChart() {
     .join('');
 }
 
-function formatAnalyticsDay(date) {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
+function formatAnalyticsDay(dateKey) {
+  const date = new Date(`${dateKey}T00:00:00Z`);
+  return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 function formatUsageDuration(seconds) {
@@ -1099,12 +1133,8 @@ function getActiveDeviceRegistration(laptop) {
 function getDeviceConnectionStatus(registration) {
   if (!registration) return 'Unregistered';
   if (!registration.last_heartbeat_at) return 'Not Connected';
-  const latestConnection = connectionHistory
-    .filter((entry) => entry.device_registration_id === registration.registration_id)
-    .sort((first, second) => new Date(second.connection_started_at).getTime() - new Date(first.connection_started_at).getTime())[0];
-  return latestConnection?.connection_status === 'ONLINE' && !latestConnection.connection_ended_at
-    ? 'Online'
-    : 'Offline';
+  const heartbeatAge = Date.now() - new Date(registration.last_heartbeat_at).getTime();
+  return heartbeatAge >= -30000 && heartbeatAge < 120000 ? 'Online' : 'Offline';
 }
 
 function getActiveLaptopAssignment(laptopId) {
@@ -1544,36 +1574,48 @@ async function sendTicketReply(event) {
 }
 
 async function loadAnalyticsData() {
-  const client = getSupabaseClient();
-  const state = document.getElementById('analyticsState');
-  if (!client) {
-    state.textContent = 'Configure Supabase in admin/config.js to load real browsing analytics.';
+  if (analyticsLoadInProgress) {
+    analyticsRefreshPending = true;
     return;
   }
-  state.textContent = 'Loading analytics…';
-  const since = new Date();
-  since.setUTCHours(0, 0, 0, 0);
-  since.setUTCDate(since.getUTCDate() - 6);
-  const records = [];
-  for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await client.from('website_usage_logs')
-      .select('id,employee_id,profile_id,domain,visit_count,total_seconds,bytes_used,recorded_at')
-      .gte('recorded_at', since.toISOString())
-      .order('recorded_at', { ascending: true })
-      .order('id', { ascending: true })
-      .range(offset, offset + 999);
-    if (error) {
-      state.textContent = `Could not load analytics: ${error.message}`;
-      state.classList.add('error-text');
+  analyticsLoadInProgress = true;
+  const client = getSupabaseClient();
+  const state = document.getElementById('analyticsState');
+  try {
+    if (!client) {
+      state.textContent = 'Configure Supabase in admin/config.js to load real browsing analytics.';
       return;
     }
-    records.push(...(data || []));
-    if (!data || data.length < 1000) break;
+    state.textContent = 'Loading analytics…';
+    const since = getPhilippinesStartOfDay();
+    since.setUTCDate(since.getUTCDate() - 6);
+    const records = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await client.from('website_usage_logs')
+        .select('id,employee_id,profile_id,domain,visit_count,total_seconds,bytes_used,recorded_at')
+        .gte('recorded_at', since.toISOString())
+        .order('recorded_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(offset, offset + 999);
+      if (error) {
+        state.textContent = `Could not load analytics: ${error.message}`;
+        state.classList.add('error-text');
+        return;
+      }
+      records.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    analyticsRecords = records;
+    state.classList.remove('error-text');
+    renderAnalyticsData(analyticsRecords);
+    renderBarChart();
+  } finally {
+    analyticsLoadInProgress = false;
+    if (analyticsRefreshPending) {
+      analyticsRefreshPending = false;
+      scheduleAnalyticsRefresh();
+    }
   }
-  analyticsRecords = records;
-  state.classList.remove('error-text');
-  renderAnalyticsData(analyticsRecords);
-  renderBarChart();
 }
 
 function renderAnalyticsData(records) {
@@ -1583,22 +1625,16 @@ function renderAnalyticsData(records) {
   const state = document.getElementById('analyticsState');
   const title = document.getElementById('analyticsChartTitle');
   const visibleRecords = getSelectedAnalyticsRecords(records);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const labels = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(today);
-    date.setUTCDate(date.getUTCDate() - (6 - index));
-    return date;
-  });
+  const labels = getPhilippinesDayKeys();
   const recordsByDay = new Map();
   visibleRecords.forEach((row) => {
-    const dateKey = new Date(row.recorded_at).toISOString().slice(0, 10);
+    const dateKey = getPhilippinesDateKey(new Date(row.recorded_at));
     const daily = recordsByDay.get(dateKey) || [];
     daily.push(row);
     recordsByDay.set(dateKey, daily);
   });
   const byDay = labels.map((date) => {
-    const rows = recordsByDay.get(date.toISOString().slice(0, 10)) || [];
+    const rows = recordsByDay.get(date) || [];
     return {
       label: formatAnalyticsDay(date),
       time: rows.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0),
@@ -1662,19 +1698,42 @@ async function syncSystem() {
   }
 }
 
+function scheduleDeviceMonitoringRefresh() {
+  if (monitoringRefreshTimeout !== null) return;
+  monitoringRefreshTimeout = window.setTimeout(() => {
+    monitoringRefreshTimeout = null;
+    refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
+  }, 500);
+}
+
 function setupMonitoringRealtime() {
   if (!supabaseClient || monitoringRealtimeChannel) return;
   monitoringRealtimeChannel = supabaseClient
     .channel('admin-device-monitoring')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'laptops' }, () => {
-      refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_registrations' }, () => {
-      refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_connection_logs' }, () => {
-      refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
-    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'laptops' }, scheduleDeviceMonitoringRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_registrations' }, scheduleDeviceMonitoringRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_connection_logs' }, scheduleDeviceMonitoringRefresh)
+    .subscribe();
+}
+
+function scheduleAnalyticsRefresh() {
+  if (analyticsRefreshTimeout !== null) window.clearTimeout(analyticsRefreshTimeout);
+  analyticsRefreshTimeout = window.setTimeout(() => {
+    analyticsRefreshTimeout = null;
+    loadAnalyticsData().catch((error) => {
+      const state = document.getElementById('analyticsState');
+      state.textContent = `Could not refresh analytics: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    });
+  }, 500);
+}
+
+function setupAnalyticsRealtime() {
+  if (!supabaseClient || analyticsRealtimeChannel) return;
+  analyticsRealtimeChannel = supabaseClient
+    .channel('admin-analytics-activity')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'website_usage_logs' }, scheduleAnalyticsRefresh)
     .subscribe();
 }
 
@@ -2133,7 +2192,7 @@ function setupDashboardInteractions() {
       };
       bindSettingsForm('generalSettingsForm', (form) => ({
         company_name: { value: form.elements.companyName.value.trim() },
-        timezone: { value: form.elements.timezone.value.trim() },
+        timezone: { value: PHILIPPINES_TIMEZONE },
         notification_preferences: { value: form.elements.notificationPreference.value },
       }), 'generalSettingsState');
       bindSettingsForm('ticketSettingsForm', (form) => ({
@@ -2229,6 +2288,7 @@ function setupDashboardInteractions() {
       const scheduleValues = {
         name: domain,
         scope: targetProfileId ? 'Employee' : 'Global',
+        timezone: PHILIPPINES_TIMEZONE,
         start_time: formData.get('startTime'),
         end_time: formData.get('endTime'),
         days_of_week: days,
@@ -2873,6 +2933,9 @@ async function initDashboard() {
   const authorized = await ensureAdminSession();
   if (!authorized) return;
 
+  updatePhilippinesClock();
+  window.setInterval(updatePhilippinesClock, 1000);
+
   const state = readState();
   applyTheme(state.theme, state.accent, true);
 
@@ -2885,11 +2948,14 @@ async function initDashboard() {
   }
   setupTicketListRealtime();
   setupMonitoringRealtime();
+  setupAnalyticsRealtime();
   await Promise.all([loadDashboardData(), loadTickets(), loadAnalyticsData()]);
   if (monitoringRefreshTimer) window.clearInterval(monitoringRefreshTimer);
   monitoringRefreshTimer = window.setInterval(() => {
     refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
-  }, 30000);
+  }, 15000);
+  if (analyticsRefreshTimer) window.clearInterval(analyticsRefreshTimer);
+  analyticsRefreshTimer = window.setInterval(scheduleAnalyticsRefresh, 30000);
   window.setInterval(() => {
     syncSystem().catch((error) => showToast(`Automatic sync failed: ${error.message}`, true));
   }, 60000);

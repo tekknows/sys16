@@ -6,6 +6,11 @@
 - Register a laptop automatically when it is assigned, and show unassigned devices as unregistered.
 - Organize single and bulk website schedules in tabs and remove the dashboard Needs attention card.
 
+## 1.2.13 - November 19, 2026
+
+- Send employee analytics and device heartbeats every 30 seconds.
+- Refresh admin analytics when employee activity arrives and show monitoring status from the latest heartbeat.
+
 ## 1.2.11 - November 18, 2026
 
 - Added per-employee website usage reporting for time spent, visits, and browser-reported transfer size.

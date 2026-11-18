@@ -5,7 +5,9 @@ const extensionSessionKey = 'mindlock-extension-session';
 const policySyncAlarm = 'mindlock-policy-sync';
 const policySyncPeriodMinutes = 1;
 const usageSyncAlarm = 'mindlock-usage-sync';
+const usageSyncPeriodMinutes = 0.5;
 const heartbeatAlarm = 'mindlock-extension-heartbeat';
+const heartbeatPeriodMinutes = 0.5;
 const heartbeatStatusKey = 'mindlock-extension-heartbeat-status';
 const usageTrackingStorageKey = 'mindlock-website-usage-tracking';
 const activeUsage = new Map();
@@ -14,6 +16,7 @@ let usageStateLoaded = false;
 let usageStateLoading = null;
 let usageSaveQueue = Promise.resolve();
 let focusedWindowId = null;
+let heartbeatInProgress = false;
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -547,8 +550,8 @@ const ticketCheckAlarm = 'mindlock-ticket-reply-check';
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
-  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
-  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: usageSyncPeriodMinutes });
+  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
   trackActiveTabs()
     .catch((error) => console.error('[LOCTIV ANALYTICS] Could not initialize active tab tracking:', error));
   sendExtensionHeartbeat();
@@ -556,8 +559,8 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
   chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
-  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: 1 });
-  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: usageSyncPeriodMinutes });
+  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
   initializeUsageAfterBrowserStart()
     .catch((error) => console.error('[LOCTIV ANALYTICS] Could not restore browser usage tracking:', error));
   sendExtensionHeartbeat();
@@ -578,7 +581,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
           .then(() => trackActiveTabs())
           .catch((error) => console.error('[LOCTIV ANALYTICS] Could not reset usage tracking for the signed-in employee:', error));
       }
-      chrome.alarms.create(heartbeatAlarm, { periodInMinutes: 1 });
+      chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
       sendExtensionHeartbeat();
     } else {
       chrome.alarms.clear(heartbeatAlarm);
@@ -611,6 +614,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 async function sendExtensionHeartbeat() {
+  if (heartbeatInProgress) return;
+  heartbeatInProgress = true;
   try {
     const session = await getValidExtensionSession();
     if (!session?.access_token) {
@@ -710,6 +715,8 @@ async function sendExtensionHeartbeat() {
   } catch (error) {
     await setHeartbeatStatus('error', 'Could not reach LOCTIV. Check this device’s internet connection; the extension will retry.');
     console.warn('[LOCTIV HEARTBEAT] Heartbeat failed; the next alarm will retry:', error.message || error);
+  } finally {
+    heartbeatInProgress = false;
   }
 }
 
