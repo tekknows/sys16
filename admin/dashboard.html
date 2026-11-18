@@ -294,7 +294,7 @@
               <h3>Laptop inventory</h3>
               <button type="button" class="primary-btn small-btn" id="addLaptopBtn">Add laptop</button>
             </div>
-            <p class="panel-subtitle">Live connection status requires the authenticated Chrome/Edge employee extension to send heartbeats once per minute.</p>
+            <p class="panel-subtitle">Setup: add the laptop, assign an active employee, then register it. The employee installs LOCTIV in Chrome/Edge and signs in with their company account; the extension sends a heartbeat each minute. Online/offline status is based on the server heartbeat, not laptop power state.</p>
             <div class="filter-row">
               <input id="laptopSearch" type="search" class="search-input" placeholder="Search ID, model or MAC address" />
               <select id="laptopStatusFilter" aria-label="Filter laptops by status">
@@ -628,16 +628,11 @@
     <div class="modal-backdrop hidden" id="deviceRegistrationModal" role="dialog" aria-modal="true" aria-labelledby="deviceRegistrationTitle">
       <section class="modal-card">
         <div class="card-header">
-          <div><p class="eyebrow">Authorized IT provisioning</p><h2 id="deviceRegistrationTitle">Device registration</h2></div>
+          <div><p class="eyebrow">LOCTIV extension setup</p><h2 id="deviceRegistrationTitle">Device registration</h2></div>
           <button class="icon-btn" data-close-modal aria-label="Close device registration">×</button>
         </div>
         <p id="deviceRegistrationMessage" class="panel-subtitle"></p>
-        <label id="deviceCredentialField" class="device-credential-field hidden">
-          <span>One-time agent credential — copy it now; it will not be saved in the dashboard.</span>
-          <textarea id="deviceCredentialValue" rows="3" readonly></textarea>
-        </label>
         <div class="actions-row">
-          <button class="secondary-btn hidden" type="button" id="copyDeviceCredentialBtn">Copy credential</button>
           <button class="secondary-btn" type="button" data-close-modal>Close</button>
         </div>
       </section>

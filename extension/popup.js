@@ -9,6 +9,12 @@ let ticketRealtimeTimer = null;
 let lastPolicySyncAt = null;
 let employeeTheme = 'light';
 
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== 'extension-heartbeat-success' || !assignedDevice || !message.received_at) return;
+  assignedDevice.last_seen_at = message.received_at;
+  updateDeviceStatus();
+});
+
 function isSupabaseConfigured() {
   return Boolean(globalThis.MINDLOCK_CONFIG?.supabaseUrl && globalThis.MINDLOCK_CONFIG?.supabaseAnonKey);
 }
@@ -170,8 +176,13 @@ function updateDeviceStatus() {
   const endpointStatus = document.getElementById('endpointStatus');
   const lastSeen = assignedDevice?.last_seen_at ? new Date(assignedDevice.last_seen_at).getTime() : NaN;
   const age = Date.now() - lastSeen;
-  const isOnline = Number.isFinite(lastSeen) && age >= 0 && age <= 2 * 60 * 1000;
-  connectionStatus.textContent = !assignedDevice ? 'Not assigned' : isOnline ? 'Online' : 'Offline';
+  const isOnline = Boolean(assignedDevice?.device_registration_id)
+    && Number.isFinite(lastSeen) && age >= 0 && age <= 2 * 60 * 1000;
+  connectionStatus.textContent = !assignedDevice
+    ? 'Not assigned'
+    : !assignedDevice.device_registration_id
+      ? 'Not registered'
+      : isOnline ? 'Online' : 'Offline';
   connectionStatus.classList.toggle('is-offline', !isOnline);
   endpointStatus.textContent = assignedDevice && assignedDevice.active !== false ? 'Active' : 'Inactive';
   endpointStatus.classList.toggle('is-offline', !assignedDevice || assignedDevice.active === false);

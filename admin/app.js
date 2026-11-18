@@ -599,14 +599,14 @@ function renderLaptopTable() {
         <td>${escapeHtml(registration?.registration_id || row.device_registration_id || '—')}</td>
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
         <td>${statusPill(registration ? 'Registered' : 'Unregistered')}</td>
-        <td>${escapeHtml(formatDate(row.last_seen_at || registration?.last_heartbeat_at))}</td>
+        <td>${escapeHtml(formatDate(registration ? registration.last_heartbeat_at : row.last_seen_at))}</td>
         <td>${escapeHtml(assignment ? formatDate(assignment.assigned_at) : '—')}</td>
         <td class="laptop-actions">
           <button type="button" class="text-btn view-laptop-details" data-laptop-id="${escapeHtml(row.id)}">View</button>
           <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
           ${registration
             ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>`
-            : `<button type="button" class="text-btn register-device" data-laptop-id="${escapeHtml(row.id)}">Register</button>`}
+            : `<button type="button" class="text-btn register-device" data-laptop-id="${escapeHtml(row.id)}"${assignment ? '' : ' disabled title="Assign an active employee before registering this device."'}>Register</button>`}
           <button type="button" class="text-btn connection-history-laptop" data-laptop-id="${escapeHtml(row.id)}">History</button>
         </td>
       </tr>`;
@@ -1015,8 +1015,10 @@ function getActiveDeviceRegistration(laptop) {
 function getDeviceConnectionStatus(registration) {
   if (!registration) return 'Unregistered';
   if (!registration.last_heartbeat_at) return 'Not Connected';
-  const age = Date.now() - new Date(registration.last_heartbeat_at).getTime();
-  return age >= 0 && age <= 2 * 60 * 1000
+  const latestConnection = connectionHistory
+    .filter((entry) => entry.device_registration_id === registration.registration_id)
+    .sort((first, second) => new Date(second.connection_started_at).getTime() - new Date(first.connection_started_at).getTime())[0];
+  return latestConnection?.connection_status === 'ONLINE' && !latestConnection.connection_ended_at
     ? 'Online'
     : 'Offline';
 }
@@ -1566,13 +1568,13 @@ function setupMonitoringRealtime() {
   monitoringRealtimeChannel = supabaseClient
     .channel('admin-device-monitoring')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'laptops' }, () => {
-      refreshDeviceMonitoring().catch(() => {});
+      refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'device_registrations' }, () => {
-      refreshDeviceMonitoring().catch(() => {});
+      refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'device_connection_logs' }, () => {
-      refreshDeviceMonitoring().catch(() => {});
+      refreshDeviceMonitoring().catch((error) => showToast(`Device monitoring refresh failed: ${error.message}`, true));
     })
     .subscribe();
 }
@@ -1667,31 +1669,8 @@ function setupDashboardInteractions() {
           return;
         }
         backdrop.classList.add('hidden');
-        if (backdrop.id === 'deviceRegistrationModal') {
-          document.getElementById('deviceCredentialValue').value = '';
-          document.getElementById('deviceCredentialField').classList.add('hidden');
-          document.getElementById('copyDeviceCredentialBtn').classList.add('hidden');
-        }
       }
     });
-  });
-  document.querySelectorAll('[data-close-modal]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (button.closest('#deviceRegistrationModal')) {
-        document.getElementById('deviceCredentialValue').value = '';
-        document.getElementById('deviceCredentialField').classList.add('hidden');
-        document.getElementById('copyDeviceCredentialBtn').classList.add('hidden');
-      }
-    });
-  });
-  document.getElementById('copyDeviceCredentialBtn')?.addEventListener('click', async () => {
-    const credential = document.getElementById('deviceCredentialValue').value;
-    try {
-      await navigator.clipboard.writeText(credential);
-      showToast('One-time device credential copied. Store it securely in the authorized agent.');
-    } catch (error) {
-      showToast(`Credential could not be copied: ${error.message}`, true);
-    }
   });
   document.getElementById('laptopTable')?.addEventListener('click', async (event) => {
     const button = event.target instanceof Element ? event.target.closest('button[data-laptop-id]') : null;
@@ -1714,7 +1693,7 @@ function setupDashboardInteractions() {
         'Device ID': registration?.registration_id || laptop.device_registration_id || '—',
         'Connection status': getDeviceConnectionStatus(registration),
         'Registration status': registration ? 'Registered' : 'Unregistered',
-        'Last seen': formatDate(laptop.last_seen_at || registration?.last_heartbeat_at),
+        'Last seen': formatDate(registration ? registration.last_heartbeat_at : laptop.last_seen_at),
         'Assignment date': assignment ? formatDate(assignment.assigned_at) : '—',
         'Registration history': deviceRegistrations
           .filter((entry) => entry.laptop_id === laptop.id)
@@ -1741,17 +1720,15 @@ function setupDashboardInteractions() {
       return;
     }
     if (button.classList.contains('register-device')) {
+      if (!getActiveLaptopAssignment(laptop.id)) {
+        showToast('Assign this laptop to an active employee before registering it.', true);
+        return;
+      }
       button.disabled = true;
       const message = document.getElementById('deviceRegistrationMessage');
       const modal = document.getElementById('deviceRegistrationModal');
-      const credentialField = document.getElementById('deviceCredentialField');
-      const credentialInput = document.getElementById('deviceCredentialValue');
-      const copyButton = document.getElementById('copyDeviceCredentialBtn');
       message.textContent = 'Registering device securely…';
       message.classList.remove('error-text');
-      credentialInput.value = '';
-      credentialField.classList.add('hidden');
-      copyButton.classList.add('hidden');
       modal.classList.remove('hidden');
       try {
         const result = await invokeSupabaseFunction('device-registration', {
@@ -1759,10 +1736,7 @@ function setupDashboardInteractions() {
           laptop_id: laptop.id,
           mac_address: laptop.mac_address || null,
         });
-        message.textContent = `${result.message} Device ID: ${result.device_id}. This registration credential is shown only once.`;
-        credentialInput.value = result.credential;
-        credentialField.classList.remove('hidden');
-        copyButton.classList.remove('hidden');
+        message.textContent = `${result.message} Device ID: ${result.device_id}`;
         try {
           await writeChangeLog('Registered device', 'Laptops', laptop.laptop_id);
         } catch (logError) {

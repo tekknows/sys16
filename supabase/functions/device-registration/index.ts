@@ -87,8 +87,7 @@ Deno.serve(async (request) => {
     }
     const registrationId = `DEV-${crypto.randomUUID().toUpperCase()}`;
     const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-    const credential = btoa(String.fromCharCode(...secretBytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-    const credentialHash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credential))));
+    const credentialHash = toHex(secretBytes);
     await rpc(config, 'register_laptop_device', {
       p_laptop_id: laptopId,
       p_registration_id: registrationId,
@@ -98,8 +97,7 @@ Deno.serve(async (request) => {
     });
     return jsonResponse({
       device_id: registrationId,
-      credential,
-      message: 'Registration created. The employee Chrome/Edge extension will use this registration ID for authenticated heartbeats.',
+      message: 'Device registered. No separate agent setup is needed. The assigned employee should install the LOCTIV Chrome/Edge extension and sign in; heartbeats will start automatically.',
     });
   } catch (error) {
     console.error('Device registration request failed:', error);

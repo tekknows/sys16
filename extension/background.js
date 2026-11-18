@@ -449,7 +449,13 @@ async function sendExtensionHeartbeat() {
       if (heartbeatResponse.status === 401 || heartbeatResponse.status === 403) {
         console.warn('[LOCTIV HEARTBEAT] Authentication or laptop assignment rejected:', result.error || heartbeatResponse.status);
       }
+      return;
     }
+    const result = await heartbeatResponse.json();
+    chrome.runtime.sendMessage({
+      type: 'extension-heartbeat-success',
+      received_at: result.received_at,
+    }).catch(() => {});
   } catch (error) {
     console.warn('[LOCTIV HEARTBEAT] Heartbeat failed; the next alarm will retry:', error.message || error);
   }
