@@ -59,6 +59,8 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Run `supabase/migrations/019_closed_ticket_replies_and_device_assignment.sql` after migration 018 to block replies and uploads on closed tickets and deactivate registrations for unassigned laptops.
 - Run `supabase/migrations/020_philippines_timezone.sql` after migration 019 to align saved schedules and the company timezone with Asia/Manila.
 - Run `supabase/migrations/021_realtime_employee_analytics.sql` after migration 020 to publish employee activity inserts for immediate analytics refresh.
+- Run `supabase/migrations/022_employee_schedules_attendance.sql` after migration 021 to enable employee schedules, authenticated Clock In / Clock Out, attendance sessions, work-status synchronization, and automatic work-session cutoff.
+- Run `supabase/migrations/023_ticket_reporting_and_category_access.sql` after migration 022 to enable the expanded ticket report categories and authenticated category lookup from the employee extension.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js` or the extension.
 - Deploy legacy endpoints with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt` if they are still used. The registration endpoint checks the admin JWT itself; legacy device heartbeat authenticates the registration credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.

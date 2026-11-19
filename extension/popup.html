@@ -64,11 +64,26 @@
         <button class="create-ticket-btn" id="createTicketBtn" type="button">Create ticket</button>
       </section>
 
+      <section class="card-block" id="clockWidget">
+        <div class="section-title-row">
+          <h2>Work session</h2>
+          <span class="endpoint-status" id="clockWorkStatus">Off Duty</span>
+        </div>
+        <div class="endpoint-details">
+          <div class="endpoint-field"><span>Employee</span><strong id="clockEmployee">Loading…</strong></div>
+          <div class="endpoint-field"><span>Assigned schedule</span><strong id="clockSchedule">Loading…</strong></div>
+          <div class="endpoint-field"><span>Clock In</span><strong id="clockInTime">—</strong></div>
+        </div>
+        <button type="button" class="primary-btn" id="clockInButton">Clock In</button>
+        <button type="button" class="secondary-btn hidden" id="clockOutButton">Clock Out</button>
+        <p class="inline-state" id="clockState" role="status"></p>
+      </section>
+
       <section class="metric-grid" aria-label="Device summary">
         <article class="metric-card">
           <span>Website visits</span>
           <strong id="todayVisitCount">Loading…</strong>
-          <small>Today</small>
+          <small>Last 7 days</small>
         </article>
         <article class="metric-card">
           <span>Blocked</span>
@@ -114,17 +129,14 @@
         <ul id="blockedList" class="list-items"></ul>
       </section>
 
-      <section class="card-block hidden">
+      <section class="card-block">
         <h2>Usage summary</h2>
-        <div class="usage-row">
-          <div>
-            <span>Time today</span>
-            <strong id="todayUsage">Loading…</strong>
-          </div>
-          <div>
-            <span>Most visited</span>
-            <strong id="mostVisitedSite">Loading…</strong>
-          </div>
+        <p class="muted-copy">Your browsing totals for the last seven days during authorized work sessions.</p>
+        <div class="usage-summary-grid">
+          <div><span>Time spent</span><strong id="todayUsage">Loading…</strong></div>
+          <div><span>Data used</span><strong id="usageDataMb">Loading…</strong></div>
+          <div><span>Website visits</span><strong id="usageVisitCount">Loading…</strong></div>
+          <div><span>Top website</span><strong id="mostVisitedSite">Loading…</strong></div>
         </div>
         <p class="inline-state" id="usageSummaryState" role="status"></p>
       </section>
@@ -156,15 +168,7 @@
       <form id="issueForm">
         <label>
           <span>Issue category</span>
-          <select>
-            <option>Browser Extension Issue</option>
-            <option>Website Blocking Issue</option>
-            <option>Laptop Hardware Problem</option>
-            <option>Internet Connection</option>
-            <option>Account and Login</option>
-            <option>Software Installation</option>
-            <option>Other Technical Issue</option>
-          </select>
+          <select id="issueCategory" required><option value="">Loading categories…</option></select>
         </label>
         <label>
           <span>Subject</span>
@@ -174,6 +178,9 @@
           <span>Description</span>
           <textarea id="issueDescription" rows="3" maxlength="5000" required></textarea>
         </label>
+        <label><span>Affected website or application (optional)</span><input id="issueAffectedService" type="text" maxlength="253" placeholder="example.com or application name" /></label>
+        <label><span>When did the issue start? (optional)</span><input id="issueStartedAt" type="datetime-local" /></label>
+        <label><span>Steps already tried (optional)</span><textarea id="issueStepsTried" rows="2" maxlength="2000" placeholder="What have you tried so far?"></textarea></label>
         <label class="attachment-field">Optional attachment <input id="issueAttachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" /></label>
         <button type="submit" class="primary-btn">Submit ticket</button>
         <p id="issueSubmitState" class="inline-state" role="status"></p>

@@ -8,6 +8,7 @@ let ticketRefreshTimer = null;
 let ticketRealtimeTimer = null;
 let lastPolicySyncAt = null;
 let employeeTheme = 'light';
+const workSessionStorageKey = 'mindlock-work-session';
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'extension-heartbeat-success' && assignedDevice && message.received_at) {
@@ -161,7 +162,7 @@ async function loadCurrentEmployee() {
 
 async function loadAssignedDevice() {
   try {
-    const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop:laptops(id,laptop_id,device_registration_id,model,manufacturer,device_name,operating_system,active,last_seen_at)&limit=1`);
+    const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop:laptops(id,laptop_id,device_registration_id,model,manufacturer,device_name,operating_system,active,last_seen_at,connectivity_status)&limit=1`);
     assignedDevice = assignments[0]?.laptop || null;
     document.getElementById('endpointEmployee').textContent = employeeProfile.full_name || employeeRecord.user_id;
     document.getElementById('endpointDevice').textContent = assignedDevice?.laptop_id || 'Not assigned';
@@ -188,6 +189,7 @@ function updateDeviceStatus() {
   const lastSeen = assignedDevice?.last_seen_at ? new Date(assignedDevice.last_seen_at).getTime() : NaN;
   const age = Date.now() - lastSeen;
   const isOnline = Boolean(assignedDevice?.device_registration_id)
+    && assignedDevice?.connectivity_status === 'Online'
     && Number.isFinite(lastSeen) && age >= 0 && age <= 2 * 60 * 1000;
   connectionStatus.textContent = !assignedDevice
     ? 'Not assigned'
@@ -197,6 +199,73 @@ function updateDeviceStatus() {
   connectionStatus.classList.toggle('is-offline', !isOnline);
   endpointStatus.textContent = assignedDevice && assignedDevice.active !== false ? 'Active' : 'Inactive';
   endpointStatus.classList.toggle('is-offline', !assignedDevice || assignedDevice.active === false);
+}
+
+async function refreshClockStatus() {
+  const state = document.getElementById('clockState');
+  try {
+    const status = await restRequest('rpc/get_my_work_status', { method: 'POST', body: {} });
+    document.getElementById('clockEmployee').textContent = employeeProfile.full_name || employeeRecord.user_id;
+    document.getElementById('clockWorkStatus').textContent = status.work_status || 'Off Duty';
+    document.getElementById('clockWorkStatus').classList.toggle('is-offline', status.work_status !== 'Working');
+
+    const schedule = status.schedule;
+    document.getElementById('clockSchedule').textContent = schedule
+      ? `${String(schedule.start_time).slice(0, 5)}–${String(schedule.end_time).slice(0, 5)} · ${(schedule.working_days || []).join(', ')}${schedule.lunch_enabled ? ` · Lunch ${String(schedule.lunch_start).slice(0, 5)}–${String(schedule.lunch_end).slice(0, 5)}` : ''}`
+      : 'No authorized schedule';
+
+    const active = status.active_session;
+    document.getElementById('clockInTime').textContent = active?.clock_in_at
+      ? new Date(active.clock_in_at).toLocaleString()
+      : '—';
+    document.getElementById('clockInButton').classList.toggle('hidden', Boolean(active));
+    document.getElementById('clockOutButton').classList.toggle('hidden', !active);
+
+    if (active) {
+      await extensionStorageSet({
+        [workSessionStorageKey]: {
+          session_id: active.id,
+          scheduled_end_at: active.scheduled_end_at,
+          clock_in_at: active.clock_in_at,
+          lunch_enabled: Boolean(schedule?.lunch_enabled),
+          lunch_start: schedule?.lunch_start || null,
+          lunch_end: schedule?.lunch_end || null,
+        },
+      });
+    } else {
+      await extensionStorageRemove(workSessionStorageKey);
+    }
+  } catch (error) {
+    state.textContent = error.message;
+  }
+}
+
+async function clockIn() {
+  const state = document.getElementById('clockState');
+  state.textContent = 'Validating schedule…';
+  try {
+    await restRequest('rpc/clock_in_employee', { method: 'POST', body: {} });
+    await refreshClockStatus();
+    await chrome.runtime.sendMessage({ type: 'work-session-changed', active: true });
+    await syncBlockingRulesInBackground();
+    state.textContent = 'Clocked In. Analytics and authorized blocking are active.';
+  } catch (error) {
+    state.textContent = error.message;
+  }
+}
+
+async function clockOut() {
+  const state = document.getElementById('clockState');
+  state.textContent = 'Ending work session…';
+  try {
+    await restRequest('rpc/clock_out_employee', { method: 'POST', body: {} });
+    await refreshClockStatus();
+    await chrome.runtime.sendMessage({ type: 'work-session-changed', active: false });
+    await syncBlockingRulesInBackground();
+    state.textContent = 'Clocked Out. Analytics and scheduled blocking are stopped.';
+  } catch (error) {
+    state.textContent = error.message;
+  }
 }
 
 function updateSyncStatus() {
@@ -299,30 +368,51 @@ function formatUsageDuration(totalSeconds) {
 
 async function loadEmployeeUsageSummary() {
   const state = document.getElementById('usageSummaryState');
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date()).reduce((values, part) => {
+    if (part.type !== 'literal') values[part.type] = part.value;
+    return values;
+  }, {});
+  const start = new Date(`${dateParts.year}-${dateParts.month}-${dateParts.day}T00:00:00+08:00`);
+  start.setUTCDate(start.getUTCDate() - 6);
   try {
-    const logs = await restRequest(
-      `website_usage_logs?profile_id=eq.${encodeURIComponent(extensionSession.user.id)}&recorded_at=gte.${encodeURIComponent(start.toISOString())}&recorded_at=lt.${encodeURIComponent(end.toISOString())}&select=domain,visit_count,total_seconds,recorded_at&order=recorded_at.desc&limit=1000`,
-    );
+    const logs = [];
+    for (let offset = 0; ; offset += 1000) {
+      const page = await restRequest(
+        `website_usage_logs?profile_id=eq.${encodeURIComponent(extensionSession.user.id)}&recorded_at=gte.${encodeURIComponent(start.toISOString())}&select=id,domain,visit_count,total_seconds,bytes_used,recorded_at&order=recorded_at.desc,id.desc&offset=${offset}&limit=1000`,
+      );
+      logs.push(...page);
+      if (page.length < 1000) break;
+    }
     const totalSeconds = logs.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0);
+    const totalBytes = logs.reduce((sum, row) => sum + (Number(row.bytes_used) || 0), 0);
     const totalVisits = logs.reduce((sum, row) => sum + (Number(row.visit_count) || 0), 0);
-    const visitsByDomain = new Map();
+    const usageByDomain = new Map();
     logs.forEach((row) => {
-      if (row.domain) visitsByDomain.set(row.domain, (visitsByDomain.get(row.domain) || 0) + (Number(row.visit_count) || 0));
+      if (!row.domain) return;
+      const domainUsage = usageByDomain.get(row.domain) || { visits: 0, seconds: 0 };
+      domainUsage.visits += Number(row.visit_count) || 0;
+      domainUsage.seconds += Number(row.total_seconds) || 0;
+      usageByDomain.set(row.domain, domainUsage);
     });
-    const mostVisited = [...visitsByDomain.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const mostVisited = [...usageByDomain.entries()]
+      .sort((a, b) => b[1].visits - a[1].visits || b[1].seconds - a[1].seconds)[0]?.[0];
     document.getElementById('todayVisitCount').textContent = String(totalVisits);
+    document.getElementById('usageVisitCount').textContent = String(totalVisits);
     document.getElementById('todayUsage').textContent = logs.length ? formatUsageDuration(totalSeconds) : 'No data';
+    document.getElementById('usageDataMb').textContent = `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
     document.getElementById('mostVisitedSite').textContent = mostVisited || '—';
-    state.textContent = logs.length ? 'Based on today’s Supabase usage records.' : 'No website usage has been recorded for today.';
+    state.textContent = logs.length ? 'Based on the last seven Philippine calendar days.' : 'No website usage has been recorded in the last seven days.';
     state.classList.remove('error-text');
   } catch (error) {
     document.getElementById('todayVisitCount').textContent = 'Unavailable';
+    document.getElementById('usageVisitCount').textContent = 'Unavailable';
     document.getElementById('todayUsage').textContent = 'Unavailable';
+    document.getElementById('usageDataMb').textContent = 'Unavailable';
     document.getElementById('mostVisitedSite').textContent = '—';
     state.textContent = `Could not load usage summary: ${error.message}`;
     state.classList.add('error-text');
@@ -330,7 +420,7 @@ async function loadEmployeeUsageSummary() {
 }
 
 async function loadEmployeeHomeData() {
-  await Promise.all([loadAssignedDevice(), loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary()]);
+  await Promise.all([loadAssignedDevice(), loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary(), refreshClockStatus()]);
 }
 
 async function loadMyTickets() {
@@ -570,6 +660,15 @@ async function sendEmployeeReply(event) {
   }
 }
 
+async function loadIssueCategories() {
+  const select = document.getElementById('issueCategory');
+  const categories = await restRequest('ticket_categories?is_active=eq.true&select=category_name&order=category_name.asc');
+  if (!categories.length) throw new Error('No active ticket report categories are configured. Contact IT.');
+  select.innerHTML = '<option value="">Select a category</option>' + categories
+    .map(({ category_name }) => `<option value="${escapeHtml(category_name)}">${escapeHtml(category_name)}</option>`)
+    .join('');
+}
+
 async function submitEmployeeTicket(event) {
   event.preventDefault();
   const status = document.getElementById('issueSubmitState');
@@ -581,13 +680,25 @@ async function submitEmployeeTicket(event) {
   let createdTicket = null;
   try {
     const [activeAssignment] = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop_id&limit=1`);
+    const descriptionParts = [
+      document.getElementById('issueDescription').value.trim(),
+      document.getElementById('issueAffectedService').value.trim()
+        ? `Affected website or application: ${document.getElementById('issueAffectedService').value.trim()}`
+        : '',
+      document.getElementById('issueStartedAt').value
+        ? `Issue started: ${new Date(document.getElementById('issueStartedAt').value).toISOString()}`
+        : '',
+      document.getElementById('issueStepsTried').value.trim()
+        ? `Steps already tried:\n${document.getElementById('issueStepsTried').value.trim()}`
+        : '',
+    ].filter(Boolean);
     const payload = {
       profile_id: extensionSession.user.id,
       employee_id: employeeRecord.id,
       laptop_id: activeAssignment?.laptop_id || null,
       subject: document.getElementById('issueSubject').value.trim(),
-      issue_category: form.querySelector('select').value,
-      description: document.getElementById('issueDescription').value.trim(),
+      issue_category: document.getElementById('issueCategory').value,
+      description: descriptionParts.join('\n\n'),
       status: 'Open',
     };
     const [ticket] = await restRequest('tickets', { method: 'POST', body: payload, prefer: 'return=representation' });
@@ -651,6 +762,13 @@ async function showEmployeeApp() {
   document.getElementById('extensionApp').classList.remove('hidden');
   await switchExtensionView('homeView');
   await loadEmployeeHomeData();
+  try {
+    await loadIssueCategories();
+  } catch (error) {
+    const status = document.getElementById('issueSubmitState');
+    status.textContent = `Report categories could not load: ${error.message}`;
+    status.classList.add('error-text');
+  }
   await loadMyTickets();
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
   ticketRefreshTimer = setInterval(() => {
@@ -682,6 +800,8 @@ async function initPopup() {
   document.getElementById('issueForm').addEventListener('submit', submitEmployeeTicket);
   document.getElementById('employeeReplyForm').addEventListener('submit', sendEmployeeReply);
   document.getElementById('reloadMyTicketsBtn').addEventListener('click', () => loadMyTickets());
+  document.getElementById('clockInButton').addEventListener('click', clockIn);
+  document.getElementById('clockOutButton').addEventListener('click', clockOut);
   document.getElementById('extensionLogoutBtn').addEventListener('click', () => signOut());
   document.getElementById('employeeTicketBackBtn').addEventListener('click', () => {
     activeTicket = null;

@@ -26,9 +26,9 @@
         <nav class="sidebar-nav" aria-label="Sidebar navigation">
           <button class="nav-link active" data-section="dashboard">Dashboard</button>
           <button class="nav-link" data-section="analytics">Analytics</button>
+          <button class="nav-link" data-section="schedules">Schedules</button>
           <button class="nav-link" data-section="blocking">Website Blocking Schedule</button>
           <button class="nav-link" data-section="assign">Assign Employee</button>
-          <button class="nav-link" data-section="requests">Request Change</button>
           <button class="nav-link" data-section="employees">Employee</button>
           <button class="nav-link" data-section="laptops">Laptop</button>
           <button class="nav-link" data-section="tickets">Ticket</button>
@@ -50,7 +50,6 @@
 
           <div class="topbar-actions">
             <button class="secondary-btn small-btn" id="syncSystemBtn"><span class="sync-icon" aria-hidden="true">⟳</span> Sync</button>
-            <span class="sync-status philippines-clock" id="philippinesClock" role="timer" aria-live="off" title="Asia/Manila"></span>
             <span class="sync-status" id="syncStatus" role="status">Last sync: Not yet synced</span>
             <button class="icon-btn notification-bell" id="notificationBellBtn" type="button" aria-label="Notifications" title="Notifications">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12h4"></path></svg>
@@ -64,7 +63,18 @@
         <p id="dashboardDataState" class="dashboard-data-state hidden" role="status"></p>
 
         <section id="dashboard" class="module-panel active">
-          <div class="stats-grid" id="statsGrid"></div>
+          <div class="dashboard-overview">
+            <div class="dashboard-clock-widget" aria-label="Current date and time in the Philippines">
+              <div class="dashboard-clock-icon" aria-hidden="true">◷</div>
+              <div>
+                <span class="dashboard-clock-label">Philippine date and time</span>
+                <strong id="dashboardClockTime" role="timer" aria-live="off">--:--:--</strong>
+                <span id="dashboardClockDate">Loading current date…</span>
+              </div>
+              <span class="dashboard-clock-zone">Asia/Manila</span>
+            </div>
+            <div class="stats-grid" id="statsGrid"></div>
+          </div>
           <div class="content-grid two-col">
             <div class="panel-card">
               <div class="card-header">
@@ -99,6 +109,7 @@
               <ul class="notification-list" id="notificationList"></ul>
             </div>
           </div>
+
         </section>
 
         <section id="analytics" class="module-panel">
@@ -121,14 +132,74 @@
           </div>
           <div class="panel-card">
             <div class="card-header">
-              <div><h3>Website usage by employee</h3><p class="panel-subtitle">Daily browsing totals for the last 7 Philippine calendar days. Live activity requires no blocking schedule.</p></div>
+              <div><h3>Website usage by employee</h3><p class="panel-subtitle">Per-website totals for the last 7 Philippine calendar days.</p></div>
               <label class="analytics-employee-filter"><span>Employee</span><select id="analyticsEmployeeFilter"><option value="">All employees</option></select></label>
             </div>
-            <p class="panel-subtitle">MB uses browser-reported resource sizes and may be inaccurate for cached or cross-origin resources. Time is focused-browser-tab time, not proof of work productivity.</p>
+            <p class="panel-subtitle">Only employees with an active registered laptop connection are listed. Click a user ID to view their seven-day records and top websites. MB uses browser-reported resource sizes and may be inaccurate for cached or cross-origin resources.</p>
             <div class="table-scroll">
               <table>
                 <thead><tr><th>Employee</th><th>Website</th><th>Time spent</th><th>Data usage</th><th>Visits</th></tr></thead>
                 <tbody id="analyticsWebsiteTable"></tbody>
+              </table>
+            </div>
+            <section id="analyticsEmployeeDetail" class="analytics-employee-detail hidden" aria-live="polite">
+              <div class="card-header">
+                <div><h3 id="analyticsEmployeeDetailTitle">Employee analytics</h3><p class="panel-subtitle">Detailed website records for the last seven days</p></div>
+                <button type="button" class="secondary-btn small-btn" id="closeAnalyticsEmployeeDetail">Close</button>
+              </div>
+              <div class="stats-grid" id="analyticsEmployeeDetailStats"></div>
+              <div class="analytics-employee-detail-content">
+                <div><h4>Top websites</h4><ul class="activity-list" id="analyticsEmployeeTopSites"></ul></div>
+                <div class="table-scroll">
+                  <table class="analytics-record-table">
+                    <thead><tr><th>Website</th><th>Recorded</th><th>Time spent</th><th>Data usage</th><th>Visits</th></tr></thead>
+                    <tbody id="analyticsEmployeeRecords"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="schedules" class="module-panel">
+          <div class="panel-card">
+            <div class="card-header">
+              <div><h3>Employee schedules</h3><p class="panel-subtitle">Schedules authorize Clock In and define the maximum work-session duration.</p></div>
+            </div>
+            <form id="employeeScheduleForm" class="form-grid schedule-form-grid">
+              <input name="scheduleId" type="hidden" />
+              <div class="schedule-field-grid">
+                <label><span>Employee</span><select name="employeeId" id="scheduleEmployee" required><option value="">Select employee</option></select></label>
+                <label><span>Start date</span><input name="startDate" type="date" required /></label>
+                <label><span>End date</span><input name="endDate" type="date" required /></label>
+                <label><span>Start time</span><input name="startTime" type="time" required /></label>
+                <label><span>End time</span><input name="endTime" type="time" required /></label>
+                <label><span>Status</span><select name="isActive"><option value="true">Active</option><option value="false">Inactive</option></select></label>
+              </div>
+              <fieldset class="schedule-lunch-fields"><legend>Lunch break</legend>
+                <label><input type="checkbox" name="lunchEnabled" id="lunchEnabled" /> Enable lunch pause</label>
+                <label><span>Lunch start</span><input name="lunchStart" type="time" /></label>
+                <label><span>Lunch end</span><input name="lunchEnd" type="time" /></label>
+              </fieldset>
+              <fieldset class="schedule-working-days"><legend>Working days</legend>
+                <label><input type="checkbox" name="workingDays" value="Mon" /> Mon</label>
+                <label><input type="checkbox" name="workingDays" value="Tue" /> Tue</label>
+                <label><input type="checkbox" name="workingDays" value="Wed" /> Wed</label>
+                <label><input type="checkbox" name="workingDays" value="Thu" /> Thu</label>
+                <label><input type="checkbox" name="workingDays" value="Fri" /> Fri</label>
+                <label><input type="checkbox" name="workingDays" value="Sat" /> Sat</label>
+                <label><input type="checkbox" name="workingDays" value="Sun" /> Sun</label>
+              </fieldset>
+              <div class="actions-row schedule-actions"><button type="submit" class="primary-btn">Save schedule</button><button type="button" class="secondary-btn" id="resetEmployeeScheduleBtn">Clear</button></div>
+              <p class="form-state hidden" id="employeeScheduleState" role="status"></p>
+            </form>
+          </div>
+          <div class="panel-card">
+            <div class="card-header"><h3>Assigned schedules</h3></div>
+            <div class="table-scroll">
+              <table class="schedule-table">
+                <thead><tr><th>Employee</th><th>Date range</th><th>Working days</th><th>Work hours</th><th>Lunch</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="employeeScheduleTable"></tbody>
               </table>
             </div>
           </div>
@@ -285,26 +356,6 @@
           </div>
         </section>
 
-        <section id="requests" class="module-panel">
-          <div class="panel-card">
-            <div class="card-header">
-              <h3>Change requests</h3>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Type</th>
-                  <th>Reason</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="requestTable"></tbody>
-            </table>
-          </div>
-        </section>
-
         <section id="employees" class="module-panel">
           <div class="panel-card">
             <div class="card-header">
@@ -395,9 +446,6 @@
               </select>
               <select id="ticketCategoryFilter" aria-label="Filter tickets by category">
                 <option value="">All categories</option>
-                <option>Browser Extension Issue</option>
-                <option>Website Blocking Issue</option>
-                <option>Laptop Hardware Problem</option>
               </select>
             </div>
             <table>
@@ -441,10 +489,7 @@
                   </select>
                 </label>
                 <button type="button" class="primary-btn" id="saveTicketStatusBtn">Update status</button>
-                <label class="ticket-status-field"><span>Assigned IT staff</span>
-                  <select id="ticketAssignedStaff"><option value="">Unassigned</option></select>
-                </label>
-                <button type="button" class="secondary-btn" id="assignTicketBtn">Save assignment</button>
+                <div class="ticket-status-field"><span>Assigned IT staff</span><strong id="ticketAssignedStaffName">—</strong><small>Tickets are assigned to the signed-in staff member when opened.</small></div>
                 <div class="internal-notes">
                   <h4>Assignment history</h4>
                   <ul id="ticketAssignmentHistory" class="message-list"></ul>
@@ -706,16 +751,6 @@
           </table>
         </div>
         <p id="connectionHistoryState" class="form-state hidden" role="status"></p>
-      </section>
-    </div>
-
-    <div class="modal-backdrop hidden" id="requestReviewModal" role="dialog" aria-modal="true" aria-labelledby="requestReviewTitle">
-      <section class="modal-card">
-        <div class="card-header"><h2 id="requestReviewTitle">Review change request</h2><button class="icon-btn" data-close-modal aria-label="Close review">×</button></div>
-        <div id="requestReviewDetails"></div>
-        <label><span>Administrator remarks</span><textarea id="requestReviewRemarks" rows="3"></textarea></label>
-        <div class="actions-row"><button class="primary-btn" id="approveRequestBtn" type="button">Approve</button><button class="secondary-btn" id="rejectRequestBtn" type="button">Reject</button></div>
-        <p class="form-state hidden" id="requestReviewState" role="status"></p>
       </section>
     </div>
 

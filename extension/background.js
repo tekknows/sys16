@@ -10,6 +10,7 @@ const heartbeatAlarm = 'mindlock-extension-heartbeat';
 const heartbeatPeriodMinutes = 0.5;
 const heartbeatStatusKey = 'mindlock-extension-heartbeat-status';
 const usageTrackingStorageKey = 'mindlock-website-usage-tracking';
+const workSessionStorageKey = 'mindlock-work-session';
 const activeUsage = new Map();
 let nextUsageEntryId = 0;
 let usageStateLoaded = false;
@@ -17,6 +18,7 @@ let usageStateLoading = null;
 let usageSaveQueue = Promise.resolve();
 let focusedWindowId = null;
 let heartbeatInProgress = false;
+let authorizedWorkSession = false;
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -83,6 +85,12 @@ function getTrackedDomain(url) {
 }
 
 async function flushWebsiteUsage() {
+  if (!await isAuthorizedWorkSession()) {
+    await ensureUsageStateLoaded();
+    activeUsage.clear();
+    await saveUsageState();
+    return;
+  }
   await ensureUsageStateLoaded();
   const session = await getValidExtensionSession();
   if (!session?.access_token) return;
@@ -174,6 +182,38 @@ async function hasExtensionUsageSession() {
   return Boolean(session?.access_token && session?.user?.id);
 }
 
+async function isAuthorizedWorkSession() {
+  const saved = await chrome.storage.local.get(workSessionStorageKey);
+  const session = saved[workSessionStorageKey];
+  if (!session?.session_id || !session?.scheduled_end_at) {
+    authorizedWorkSession = false;
+    return false;
+  }
+  const endAt = new Date(session.scheduled_end_at).getTime();
+  if (!Number.isFinite(endAt) || endAt <= Date.now()) {
+    authorizedWorkSession = false;
+    await chrome.storage.local.remove(workSessionStorageKey);
+    await ensureUsageStateLoaded();
+    activeUsage.clear();
+    await saveUsageState();
+    return false;
+  }
+  if (session.lunch_enabled && session.lunch_start && session.lunch_end) {
+    const parts = getZonedClock(new Date(), 'Asia/Manila');
+    const inLunch = parts.time >= String(session.lunch_start).slice(0, 5)
+      && parts.time < String(session.lunch_end).slice(0, 5);
+    if (inLunch) {
+      authorizedWorkSession = false;
+      await ensureUsageStateLoaded();
+      activeUsage.forEach((entry) => stopUsageEntry(entry));
+      await saveUsageState();
+      return false;
+    }
+  }
+  authorizedWorkSession = true;
+  return true;
+}
+
 function stopUsageEntry(entry, stoppedAt = Date.now()) {
   if (entry.startedAt !== null) {
     entry.secondsPending += Math.max(0, Math.floor((stoppedAt - entry.startedAt) / 1000));
@@ -186,6 +226,7 @@ function getOpenUsageEntry(tabId) {
 }
 
 function trackTabVisit(tabId, url, windowId) {
+  if (!authorizedWorkSession) return;
   const domain = getTrackedDomain(url);
   if (!domain) return;
   const now = Date.now();
@@ -218,6 +259,7 @@ function trackTabVisit(tabId, url, windowId) {
 chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
   try {
     await ensureUsageStateLoaded();
+    if (!await isAuthorizedWorkSession()) return;
     if (!await hasExtensionUsageSession()) return;
     if (await getFocusedWindowId() !== windowId) return;
     const now = Date.now();
@@ -235,6 +277,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'loading' || !tab.active || !tab.url) return;
   try {
     await ensureUsageStateLoaded();
+    if (!await isAuthorizedWorkSession()) return;
     if (!await hasExtensionUsageSession()) return;
     if (await getFocusedWindowId() !== tab.windowId) return;
     trackTabVisit(tabId, tab.url, tab.windowId);
@@ -258,6 +301,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 });
 async function trackActiveTabs() {
   await ensureUsageStateLoaded();
+  if (!await isAuthorizedWorkSession()) return;
   if (!await hasExtensionUsageSession()) return;
   const windowId = await getFocusedWindowId();
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
@@ -285,6 +329,7 @@ async function initializeUsageAfterBrowserStart() {
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
   try {
     await ensureUsageStateLoaded();
+    if (!await isAuthorizedWorkSession()) return;
     const now = Date.now();
     focusedWindowId = windowId;
     activeUsage.forEach((entry) => {
@@ -304,6 +349,27 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
   }
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'work-session-changed') return false;
+  isAuthorizedWorkSession()
+    .then(async (active) => {
+      if (!active) {
+        await ensureUsageStateLoaded();
+        activeUsage.forEach((entry) => stopUsageEntry(entry));
+        activeUsage.clear();
+        await saveUsageState();
+      } else {
+        await trackActiveTabs();
+        await chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
+        sendExtensionHeartbeat();
+      }
+      await syncBlockingRules();
+      sendResponse({ ok: true, active });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'usage-bytes') return false;
   const tabId = sender.tab?.id;
   const bytes = Number(message.bytes);
@@ -313,6 +379,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   ensureUsageStateLoaded()
     .then(async () => {
+      if (!await isAuthorizedWorkSession()) {
+        sendResponse({ ok: false });
+        return;
+      }
       const entry = getOpenUsageEntry(tabId);
       if (entry) entry.bytesUsed += Math.floor(bytes);
       await saveUsageState();
@@ -439,6 +509,21 @@ async function loadBlockingSchedules(session) {
 async function syncBlockingRules(sessionOverride = null) {
   const cached = await chrome.storage.local.get(['mindlock-blocking-policies']);
   const session = sessionOverride || await getValidExtensionSession();
+  if (!await isAuthorizedWorkSession()) {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: managedRules.map((rule) => rule.id),
+      addRules: [],
+    });
+    await chrome.storage.local.set({ 'mindlock-blocking-policies': [] });
+    return {
+      domains: [],
+      installedRuleCount: 0,
+      activePolicies: [],
+      diagnostic: { retrievedPolicyCount: 0, applicableScheduleCount: 0, activeDomainCount: 0 },
+    };
+  }
   let schedules = [];
   if (session) {
     try {
@@ -568,6 +653,19 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[workSessionStorageKey]) {
+    isAuthorizedWorkSession()
+      .then(async (active) => {
+        if (!active) {
+          await ensureUsageStateLoaded();
+          activeUsage.forEach((entry) => stopUsageEntry(entry));
+          activeUsage.clear();
+          await saveUsageState();
+        }
+        await syncBlockingRules();
+      })
+      .catch((error) => console.error('[LOCTIV WORK SESSION] Could not update monitoring state:', error));
+  }
   if (area === 'local' && changes[extensionSessionKey]) {
     const previousProfileId = changes[extensionSessionKey].oldValue?.user?.id;
     const nextSession = changes[extensionSessionKey].newValue;
@@ -621,6 +719,11 @@ async function sendExtensionHeartbeat() {
     if (!session?.access_token) {
       await chrome.alarms.clear(heartbeatAlarm);
       await setHeartbeatStatus('offline', 'Sign in to LOCTIV to connect this device.');
+      return;
+    }
+    if (!await isAuthorizedWorkSession()) {
+      await chrome.alarms.clear(heartbeatAlarm);
+      await setHeartbeatStatus('offline', 'Off Duty. The work-session heartbeat is stopped.');
       return;
     }
 

@@ -17,16 +17,17 @@ let monitoringRealtimeChannel = null;
 let ticketPollTimer = null;
 let analyticsMetric = 'time';
 let analyticsRecords = [];
+let selectedAnalyticsEmployeeId = null;
+let ticketCategories = [];
 let directoryEmployees = [];
 let directoryLaptops = [];
 let directoryAssignments = [];
 let blockingRules = [];
-let changeRequests = [];
+let employeeSchedules = [];
 let activityLogs = [];
 let notifications = [];
 let deviceRegistrations = [];
 let connectionHistory = [];
-let selectedChangeRequest = null;
 let blockingScheduleSchemaReady = true;
 let blockingScheduleLinkReady = true;
 let blockingTargetSchemaReady = true;
@@ -116,14 +117,19 @@ function getPhilippinesStartOfDay(date = new Date()) {
 }
 
 function updatePhilippinesClock() {
-  const clock = document.getElementById('philippinesClock');
-  if (!clock) return;
   const now = new Date();
-  clock.textContent = `Philippine time: ${new Intl.DateTimeFormat('en-PH', {
+  const date = new Intl.DateTimeFormat('en-PH', {
     timeZone: PHILIPPINES_TIMEZONE,
-    dateStyle: 'medium',
+    dateStyle: 'full',
+  }).format(now);
+  const time = new Intl.DateTimeFormat('en-PH', {
+    timeZone: PHILIPPINES_TIMEZONE,
     timeStyle: 'medium',
-  }).format(now)}`;
+  }).format(now);
+  const dashboardTime = document.getElementById('dashboardClockTime');
+  if (dashboardTime) dashboardTime.textContent = time;
+  const dashboardDate = document.getElementById('dashboardClockDate');
+  if (dashboardDate) dashboardDate.textContent = date;
 }
 
 function isSupabaseConfigured() {
@@ -329,7 +335,6 @@ function renderMetricCards() {
     ['Assigned laptops', activeAssignments],
     ['Available laptops', directoryLaptops.filter((row) => row.status === 'Available').length],
     ['Blocking policies', blockingRules.length],
-    ['Pending requests', changeRequests.filter((row) => row.status === 'Pending').length],
   ];
   statsGrid.innerHTML = stats.map(([label, value]) => `
     <article class="stat-card"><span class="metric-label">${label}</span><strong class="metric-value">${value}</strong></article>
@@ -453,10 +458,12 @@ function renderAnalyticsEmployeeFilter() {
   const select = document.getElementById('analyticsEmployeeFilter');
   if (!select) return;
   const selectedId = select.value;
-  select.innerHTML = '<option value="">All employees</option>' + directoryEmployees
+  const connectedEmployees = getConnectedRegisteredEmployees();
+  select.innerHTML = '<option value="">All connected employees</option>' + connectedEmployees
     .map((employee) => `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.userId)})</option>`)
     .join('');
-  if (directoryEmployees.some((employee) => employee.id === selectedId)) select.value = selectedId;
+  if (connectedEmployees.some((employee) => employee.id === selectedId)) select.value = selectedId;
+  else select.value = '';
   renderAnalyticsData(analyticsRecords);
   renderBarChart();
 }
@@ -464,14 +471,17 @@ function renderAnalyticsEmployeeFilter() {
 function renderAnalyticsWebsiteTable(records) {
   const table = document.getElementById('analyticsWebsiteTable');
   if (!table) return;
-  const employees = new Map(directoryEmployees.map((employee) => [employee.id, employee.name]));
+  const employees = new Map(getConnectedRegisteredEmployees().map((employee) => [employee.id, employee]));
   const totals = new Map();
   records.forEach((row) => {
     const employeeId = row.employee_id || row.profile_id || '';
+    const employee = employees.get(employeeId);
+    if (!employee) return;
     const key = `${employeeId}\u0000${row.domain}`;
     const total = totals.get(key) || {
       employeeId,
-      employeeName: employees.get(employeeId) || 'Unknown employee',
+      employeeName: employee.name || 'Unknown employee',
+      employeeUserId: employee.user_id,
       domain: row.domain,
       seconds: 0,
       bytes: 0,
@@ -485,13 +495,74 @@ function renderAnalyticsWebsiteTable(records) {
   table.innerHTML = [...totals.values()]
     .sort((a, b) => b.seconds - a.seconds || b.bytes - a.bytes)
     .map((row) => `<tr>
-      <td>${escapeHtml(row.employeeName)}</td>
+      <td><button type="button" class="analytics-employee-link" data-analytics-employee-id="${escapeHtml(row.employeeId)}" aria-label="View analytics for ${escapeHtml(row.employeeName)}">${escapeHtml(row.employeeUserId)}<small>${escapeHtml(row.employeeName)}</small></button></td>
       <td>${escapeHtml(row.domain || 'Unknown website')}</td>
       <td>${formatUsageDuration(row.seconds)}</td>
       <td>${(row.bytes / (1024 * 1024)).toFixed(2)} MB</td>
       <td>${row.visits}</td>
     </tr>`)
-    .join('') || '<tr><td colspan="5">No website usage was recorded for this selection in the last 7 days.</td></tr>';
+    .join('') || '<tr><td colspan="5">No usage records for connected employees with registered laptops in this selection.</td></tr>';
+}
+
+function getConnectedRegisteredEmployees() {
+  const now = Date.now();
+  return directoryEmployees.filter((employee) => {
+    if (!employee.active) return false;
+    const assignment = directoryAssignments.find((row) => row.employee_id === employee.id && row.status === 'Active');
+    const laptop = assignment?.laptop;
+    if (!laptop?.device_registration_id || laptop.connectivity_status !== 'Online') return false;
+    const registration = getActiveDeviceRegistration(laptop);
+    if (!registration?.is_active || !registration.last_heartbeat_at) return false;
+    const heartbeatAge = now - new Date(registration.last_heartbeat_at).getTime();
+    return heartbeatAge >= -30000 && heartbeatAge < 120000;
+  });
+}
+
+function renderAnalyticsEmployeeDetail(employeeId) {
+  const employee = getConnectedRegisteredEmployees().find((row) => row.id === employeeId);
+  const panel = document.getElementById('analyticsEmployeeDetail');
+  if (!employee || !panel) {
+    panel?.classList.add('hidden');
+    return;
+  }
+  selectedAnalyticsEmployeeId = employeeId;
+  const records = getSelectedAnalyticsRecords(analyticsRecords).filter((row) =>
+    (row.employee_id || row.profile_id) === employeeId);
+  const byDomain = new Map();
+  records.forEach((record) => {
+    const domain = record.domain || 'Unknown website';
+    const total = byDomain.get(domain) || { seconds: 0, bytes: 0, visits: 0 };
+    total.seconds += Number(record.total_seconds) || 0;
+    total.bytes += Number(record.bytes_used) || 0;
+    total.visits += Number(record.visit_count) || 0;
+    byDomain.set(domain, total);
+  });
+  const rankedSites = [...byDomain.entries()].sort((a, b) => b[1].visits - a[1].visits || b[1].seconds - a[1].seconds);
+  const seconds = records.reduce((sum, record) => sum + (Number(record.total_seconds) || 0), 0);
+  const bytes = records.reduce((sum, record) => sum + (Number(record.bytes_used) || 0), 0);
+  const visits = records.reduce((sum, record) => sum + (Number(record.visit_count) || 0), 0);
+  document.getElementById('analyticsEmployeeDetailTitle').textContent = `${employee.name} (${employee.user_id})`;
+  document.getElementById('analyticsEmployeeDetailStats').innerHTML = [
+    { label: 'Time spent', value: formatUsageDuration(seconds) },
+    { label: 'Data usage', value: `${(bytes / (1024 * 1024)).toFixed(2)} MB` },
+    { label: 'Visits', value: String(visits) },
+    { label: 'Top website', value: rankedSites[0]?.[0] || 'No data' },
+  ].map((item) => `<article class="stat-card"><span class="metric-label">${escapeHtml(item.label)}</span><strong class="metric-value">${escapeHtml(item.value)}</strong></article>`).join('');
+  document.getElementById('analyticsEmployeeTopSites').innerHTML = rankedSites.slice(0, 5)
+    .map(([domain, total]) => `<li><span class="dot"></span><span>${escapeHtml(domain)} · ${formatUsageDuration(total.seconds)} · ${(total.bytes / (1024 * 1024)).toFixed(2)} MB</span></li>`)
+    .join('') || '<li>No website data recorded in the last seven days.</li>';
+  document.getElementById('analyticsEmployeeRecords').innerHTML = [...records]
+    .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at))
+    .map((record) => `<tr>
+      <td>${escapeHtml(record.domain || 'Unknown website')}</td>
+      <td>${escapeHtml(formatDate(record.recorded_at))}</td>
+      <td>${formatUsageDuration(Number(record.total_seconds) || 0)}</td>
+      <td>${((Number(record.bytes_used) || 0) / (1024 * 1024)).toFixed(2)} MB</td>
+      <td>${Number(record.visit_count) || 0}</td>
+    </tr>`)
+    .join('') || '<tr><td colspan="5">No website records for the last seven days.</td></tr>';
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function escapeHtml(value) {
@@ -597,20 +668,6 @@ function renderAssignmentOptions() {
   const laptops = directoryLaptops.filter((row) => row.status !== 'Retired');
   employeeSelect.innerHTML = `<option value="">Select an employee</option>${employees.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)}</option>`).join('')}`;
   laptopSelect.innerHTML = `<option value="">Select a laptop</option>${laptops.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.laptop_id)}${directoryAssignments.some((assignment) => assignment.laptop_id === row.id && assignment.status === 'Active') ? ' (currently assigned)' : ''}</option>`).join('')}`;
-}
-
-function renderRequestTable() {
-  const table = document.getElementById('requestTable');
-  if (!table) return;
-  table.innerHTML = changeRequests.length ? changeRequests.map((row) => `
-        <tr>
-          <td>${escapeHtml(row.employeeName || 'Unknown employee')}</td>
-          <td>${escapeHtml(row.request_type)}</td>
-          <td>${escapeHtml(row.reason)}</td>
-          <td><span class="status-pill ${row.status === 'Approved' ? 'success' : row.status === 'Pending' ? 'warning' : 'neutral'}">${escapeHtml(row.status)}</span></td>
-          <td><button class="text-btn review-change-request" type="button" data-request-id="${escapeHtml(row.id)}">Review</button></td>
-        </tr>
-      `).join('') : '<tr><td colspan="5">No change requests.</td></tr>';
 }
 
 function renderEmployeeTable() {
@@ -829,9 +886,8 @@ async function loadDashboardData() {
       client.from('employees').select('id,profile_id,user_id,department,position,active').order('created_at', { ascending: false }),
       client.from('profiles').select('id,full_name,email,department,position,account_status'),
       client.from('user_roles').select('profile_id,role_name').is('revoked_at', null),
-      client.from('laptops').select('id,laptop_id,device_registration_id,device_name,manufacturer,model,serial_number,mac_address,operating_system,browser,extension_version,status,last_sync_at,last_seen_at').order('created_at', { ascending: false }),
+      client.from('laptops').select('id,laptop_id,device_registration_id,device_name,manufacturer,model,serial_number,mac_address,operating_system,browser,extension_version,status,last_sync_at,last_seen_at,connectivity_status,work_session_id').order('created_at', { ascending: false }),
       client.from('laptop_assignments').select('id,employee_id,laptop_id,status,assigned_at,ended_at,expires_at').order('assigned_at', { ascending: false }),
-      client.from('laptop_change_requests').select('id,profile_id,request_type,reason,status,created_at').order('created_at', { ascending: false }).limit(100),
       client.from('change_logs').select('id,action,module_name,created_at').order('created_at', { ascending: false }).limit(8),
       client.from('notifications').select('id,title,body,link,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
       client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
@@ -839,12 +895,17 @@ async function loadDashboardData() {
       client.from('system_settings').select('setting_key,setting_value'),
     ]);
     let laptopResult = results[3];
-    if (laptopResult.error && /mac_address/i.test(laptopResult.error.message)) {
+    if (laptopResult.error && /mac_address|connectivity_status|work_session_id/i.test(laptopResult.error.message)) {
       laptopResult = await client.from('laptops')
-        .select('id,laptop_id,device_name,manufacturer,model,serial_number,operating_system,browser,extension_version,status,last_sync_at')
+        .select('id,laptop_id,device_registration_id,device_name,manufacturer,model,serial_number,operating_system,browser,extension_version,status,last_sync_at,last_seen_at')
         .order('created_at', { ascending: false });
       if (!laptopResult.error) {
-        laptopResult.data = (laptopResult.data || []).map((laptop) => ({ ...laptop, mac_address: '' }));
+        laptopResult.data = (laptopResult.data || []).map((laptop) => ({
+          ...laptop,
+          mac_address: '',
+          connectivity_status: 'Offline',
+          work_session_id: null,
+        }));
       }
     }
     const failed = results.filter((_, index) => index !== 3).find((result) => result.error);
@@ -855,7 +916,13 @@ async function loadDashboardData() {
     blockingScheduleSchemaReady = policyResult.canonical;
     blockingScheduleLinkReady = policyResult.scheduleLink !== false;
     blockingTargetSchemaReady = true;
-    const [employeeResult, profileResult, roleResult, , assignmentResult, requestResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
+    const scheduleResult = await client.from('employee_schedules')
+      .select('id,employee_id,start_date,end_date,working_days,start_time,end_time,lunch_enabled,lunch_start,lunch_end,timezone,is_active,created_at')
+      .order('created_at', { ascending: false });
+    if (scheduleResult.error && !/employee_schedules/i.test(scheduleResult.error.message)) throw scheduleResult.error;
+    employeeSchedules = scheduleResult.error ? [] : (scheduleResult.data || []);
+    await loadTicketCategories(client);
+    const [employeeResult, profileResult, roleResult, , assignmentResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
     const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
     const roles = new Map((roleResult.data || []).map((role) => [role.profile_id, role.role_name]));
@@ -872,7 +939,7 @@ async function loadDashboardData() {
         role: roles.get(employee.profile_id) || 'Employee',
       };
     });
-    renderAnalyticsEmployeeFilter();
+    renderEmployeeSchedules();
     const targetEmployeeSelect = document.getElementById('blockingTargetEmployee');
     if (targetEmployeeSelect) {
       const selectedProfileId = targetEmployeeSelect.value;
@@ -915,13 +982,9 @@ async function loadDashboardData() {
       }));
     deviceRegistrations = registrationResult.data || [];
     connectionHistory = historyResult.data || [];
+    renderAnalyticsEmployeeFilter();
     renderConnectionFilterOptions();
     blockingRules = policyResult.data || [];
-    const requestProfiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile.full_name]));
-    changeRequests = (requestResult.data || []).map((request) => ({
-      ...request,
-      employeeName: requestProfiles.get(request.profile_id) || 'Unknown employee',
-    }));
     activityLogs = logResult.data || [];
     notifications = notificationResult.data || [];
     renderSettingsForms();
@@ -931,7 +994,6 @@ async function loadDashboardData() {
     renderBlockingTable();
     renderAssignmentTable();
     renderAssignmentOptions();
-    renderRequestTable();
     renderEmployeeTable();
     renderUserRoleAssignments();
     renderLaptopTable();
@@ -958,13 +1020,14 @@ async function refreshDeviceMonitoring() {
     showToast(`Connection status could not be refreshed: ${closeError.message}`, true);
     return;
   }
-  const [registrationResult, historyResult] = await Promise.all([
+  const [registrationResult, historyResult, laptopResult] = await Promise.all([
     client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
     client.from('device_connection_logs').select('id,laptop_id,employee_id,device_registration_id,connection_started_at,connection_ended_at,last_heartbeat_at,connection_status,recorded_at').order('recorded_at', { ascending: false }).limit(500),
+    client.from('laptops').select('id,connectivity_status,work_session_id,last_seen_at'),
   ]);
-  if (registrationResult.error || historyResult.error) {
+  if (registrationResult.error || historyResult.error || laptopResult.error) {
     deviceMonitoringSchemaReady = false;
-    showToast(`Device monitoring refresh failed: ${(registrationResult.error || historyResult.error).message}`, true);
+    showToast(`Device monitoring refresh failed: ${(registrationResult.error || historyResult.error || laptopResult.error).message}`, true);
     return;
   }
   deviceRegistrations = registrationResult.data || [];
@@ -972,8 +1035,10 @@ async function refreshDeviceMonitoring() {
   const recentHeartbeats = new Map(deviceRegistrations
     .filter((registration) => registration.is_active && registration.last_heartbeat_at)
     .map((registration) => [registration.laptop_id, registration.last_heartbeat_at]));
+  const liveLaptopStates = new Map((laptopResult.data || []).map((laptop) => [laptop.id, laptop]));
   directoryLaptops = directoryLaptops.map((laptop) => ({
     ...laptop,
+    ...(liveLaptopStates.get(laptop.id) || {}),
     last_seen_at: recentHeartbeats.get(laptop.id) || laptop.last_seen_at,
   }));
   const updatedLaptops = new Map(directoryLaptops.map((laptop) => [laptop.id, laptop]));
@@ -984,6 +1049,10 @@ async function refreshDeviceMonitoring() {
   renderEmployeeTable();
   renderLaptopTable();
   renderConnectionHistory();
+  renderAnalyticsEmployeeFilter();
+  if (document.getElementById('analytics').classList.contains('active')) {
+    loadAnalyticsData().catch((error) => showToast(`Analytics refresh failed: ${error.message}`, true));
+  }
 }
 
 function updateNotificationBell() {
@@ -1320,7 +1389,7 @@ function renderTicketInfo(ticket) {
   };
   document.getElementById('ticketDetailNumber').textContent = ticket.ticket_number;
   document.getElementById('ticketDetailStatus').value = ticket.status;
-  document.getElementById('ticketAssignedStaff').value = ticket.assigned_to || '';
+  document.getElementById('ticketAssignedStaffName').textContent = ticket.assigned_staff?.full_name || 'Unassigned';
   document.getElementById('ticketInfoList').innerHTML = Object.entries(info)
     .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('');
 }
@@ -1437,15 +1506,38 @@ function closeTicketDetail() {
 }
 
 async function openTicketDetail(ticketId, ticketRecord = null) {
-  const ticket = ticketRecord || ticketsOnPage.find((row) => row.id === ticketId);
+  let ticket = ticketRecord || ticketsOnPage.find((row) => row.id === ticketId);
   if (!ticket) return;
+  const detailState = document.getElementById('ticketDetailState');
+  detailState.textContent = '';
+  detailState.classList.remove('error-text');
+  if (ticket.assigned_to !== adminUser.id) {
+    detailState.textContent = 'Assigning this ticket to you…';
+    try {
+      const { error: assignmentError } = await supabaseClient.rpc('assign_ticket_staff', {
+        target_ticket_id: ticket.id,
+        target_profile_id: adminUser.id,
+      });
+      if (assignmentError) throw assignmentError;
+      const { data: updatedTicket, error: ticketError } = await supabaseClient.from('tickets')
+        .select('id,ticket_number,profile_id,employee_id,laptop_id,subject,issue_category,priority,assigned_to,status,description,created_at,updated_at,profile:profiles!tickets_profile_id_fkey(full_name,email),employee:employees!tickets_employee_id_fkey(user_id),laptop:laptops!tickets_laptop_id_fkey(laptop_id,device_registration_id,model),assigned_staff:profiles!tickets_assigned_to_fkey(full_name)')
+        .eq('id', ticket.id)
+        .single();
+      if (ticketError) throw ticketError;
+      ticket = updatedTicket;
+      detailState.textContent = 'Ticket assigned to you.';
+    } catch (error) {
+      detailState.textContent = `Could not assign this ticket to you: ${error.message}`;
+      detailState.classList.add('error-text');
+    }
+  }
   selectedTicket = ticket;
   document.getElementById('ticketListView').classList.add('hidden');
   document.getElementById('ticketDetailView').classList.remove('hidden');
-  document.getElementById('ticketDetailState').textContent = '';
+  if (ticket.assigned_to === adminUser.id) detailState.classList.remove('error-text');
   document.getElementById('internalNotesList').innerHTML = '<li>Loading private notes…</li>';
   renderTicketInfo(ticket);
-  await Promise.all([loadTicketConversation(), loadInternalNotes(), loadAssignableStaff(), loadTicketAssignmentHistory()]);
+  await Promise.all([loadTicketConversation(), loadInternalNotes(), loadTicketAssignmentHistory()]);
   subscribeToTicket(ticket.id);
   if (ticketPollTimer) window.clearInterval(ticketPollTimer);
   ticketPollTimer = window.setInterval(() => {
@@ -1453,29 +1545,6 @@ async function openTicketDetail(ticketId, ticketRecord = null) {
     refreshSelectedTicket();
     loadTickets();
   }, 15000);
-}
-
-async function loadAssignableStaff() {
-  const client = getSupabaseClient();
-  const select = document.getElementById('ticketAssignedStaff');
-  if (!client || !select) return;
-  const { data, error } = await client.from('user_roles')
-    .select('profile_id,profile:profiles!user_roles_profile_id_fkey(full_name,email)')
-    .in('role_name', ['Administrator', 'IT Staff'])
-    .is('revoked_at', null);
-  if (error) {
-    document.getElementById('ticketDetailState').textContent = `Could not load assignable IT staff: ${error.message}`;
-    return;
-  }
-  const uniqueStaff = new Map();
-  (data || []).forEach((row) => {
-    if (row.profile) uniqueStaff.set(row.profile_id, row.profile);
-  });
-  select.innerHTML = '<option value="">Unassigned</option>' + [...uniqueStaff.entries()]
-    .sort(([, first], [, second]) => first.full_name.localeCompare(second.full_name))
-    .map(([id, profile]) => `<option value="${escapeHtml(id)}">${escapeHtml(profile.full_name)} · ${escapeHtml(profile.email)}</option>`)
-    .join('');
-  select.value = selectedTicket?.assigned_to || '';
 }
 
 async function loadTicketAssignmentHistory() {
@@ -1651,6 +1720,7 @@ function renderAnalyticsData(records) {
     { label: 'Unique websites', value: String(uniqueSites), trend: 'last 7 days' },
   ].map((item) => `<article class="stat-card"><span class="metric-label">${item.label}</span><strong class="metric-value">${item.value}</strong><span class="metric-trend positive">${item.trend}</span></article>`).join('');
   renderAnalyticsWebsiteTable(visibleRecords);
+  if (selectedAnalyticsEmployeeId) renderAnalyticsEmployeeDetail(selectedAnalyticsEmployeeId);
   const metric = analyticsMetric === 'data' ? 'data' : analyticsMetric === 'sites' ? 'visits' : 'time';
   const metricTitle = analyticsMetric === 'data' ? 'Data usage (MB)' : analyticsMetric === 'sites' ? 'Website visits' : 'Website time spent';
   title.textContent = metricTitle;
@@ -1741,9 +1811,194 @@ function setupTicketListRealtime() {
   if (!supabaseClient || ticketListRealtimeChannel) return;
   ticketListRealtimeChannel = supabaseClient
     .channel('admin-ticket-list')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => loadTickets())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => {
+      loadTickets();
+    })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ticket_messages' }, () => loadTickets())
     .subscribe();
+}
+
+async function loadTicketCategories(client = getSupabaseClient()) {
+  if (!client) return;
+  const { data, error } = await client.from('ticket_categories')
+    .select('category_name')
+    .eq('is_active', true)
+    .order('category_name');
+  if (error) throw new Error(`Could not load ticket categories: ${error.message}`);
+  ticketCategories = (data || []).map((row) => row.category_name);
+  const select = document.getElementById('ticketCategoryFilter');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = '<option value="">All categories</option>' + ticketCategories
+    .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
+    .join('');
+  if (ticketCategories.includes(previous)) select.value = previous;
+}
+
+function renderEmployeeSchedules() {
+  const employeeSelect = document.getElementById('scheduleEmployee');
+  if (employeeSelect) {
+    const selected = employeeSelect.value;
+    employeeSelect.innerHTML = '<option value="">Select employee</option>' + directoryEmployees
+      .filter((employee) => employee.active)
+      .map((employee) => `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`)
+      .join('');
+    if (selected) employeeSelect.value = selected;
+  }
+
+  const employeesById = new Map(directoryEmployees.map((employee) => [employee.id, employee]));
+  const table = document.getElementById('employeeScheduleTable');
+  if (!table) return;
+  table.innerHTML = employeeSchedules.map((schedule) => {
+    const employee = employeesById.get(schedule.employee_id);
+    const employeeName = employee?.name || 'Unknown employee';
+    const initials = employeeName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase() || '?';
+    const workingDays = (schedule.working_days || [])
+      .map((day) => `<span class="schedule-day">${escapeHtml(day)}</span>`)
+      .join('');
+    const startDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(`${schedule.start_date}T00:00:00`));
+    const endDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(`${schedule.end_date}T00:00:00`));
+    return `<tr>
+      <td><div class="schedule-employee"><span class="schedule-avatar">${escapeHtml(initials)}</span><div><strong>${escapeHtml(employeeName)}</strong><small>${escapeHtml(employee?.user_id || '')}</small></div></div></td>
+      <td><div class="schedule-date"><strong>${escapeHtml(startDate)}</strong><small>to ${escapeHtml(endDate)}</small></div></td>
+      <td><div class="schedule-days">${workingDays || '<span class="schedule-day">—</span>'}</div></td>
+      <td><div class="schedule-time"><strong>${escapeHtml(String(schedule.start_time).slice(0, 5))} – ${escapeHtml(String(schedule.end_time).slice(0, 5))}</strong><small>Asia/Manila</small></div></td>
+      <td><div class="schedule-time"><strong>${schedule.lunch_enabled ? `${escapeHtml(String(schedule.lunch_start).slice(0, 5))} – ${escapeHtml(String(schedule.lunch_end).slice(0, 5))}` : 'No lunch'}</strong><small>${schedule.lunch_enabled ? 'Lunch pause' : 'No break configured'}</small></div></td>
+      <td><span class="pill ${schedule.is_active ? 'success' : 'neutral'}">${schedule.is_active ? 'Active' : 'Inactive'}</span></td>
+      <td><div class="schedule-actions-cell"><button type="button" class="text-btn edit-employee-schedule" data-schedule-id="${escapeHtml(schedule.id)}">Edit</button>
+        <button type="button" class="text-btn employee-schedule-toggle" data-schedule-id="${escapeHtml(schedule.id)}">${schedule.is_active ? 'Deactivate' : 'Activate'}</button></div></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7">No employee schedules configured.</td></tr>';
+}
+
+function setupEmployeeScheduleInteractions() {
+  const form = document.getElementById('employeeScheduleForm');
+  const resetBtn = document.getElementById('resetEmployeeScheduleBtn');
+  const resetForm = () => {
+    form.reset();
+    form.elements.scheduleId.value = '';
+    form.elements.lunchStart.disabled = true;
+    form.elements.lunchEnd.disabled = true;
+  };
+  if (resetBtn) resetBtn.addEventListener('click', resetForm);
+  form.elements.lunchEnabled.addEventListener('change', () => {
+    const enabled = form.elements.lunchEnabled.checked;
+    form.elements.lunchStart.disabled = !enabled;
+    form.elements.lunchEnd.disabled = !enabled;
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const state = document.getElementById('employeeScheduleState');
+    const workingDays = [...form.querySelectorAll('input[name="workingDays"]:checked')].map((input) => input.value);
+    if (!workingDays.length) {
+      state.textContent = 'Select at least one working day.';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    if (form.elements.startDate.value > form.elements.endDate.value) {
+      state.textContent = 'End date must be on or after the start date.';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    if (form.elements.startTime.value >= form.elements.endTime.value) {
+      state.textContent = 'Start time must be before end time.';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    const lunchEnabled = form.elements.lunchEnabled.checked;
+    const lunchStart = form.elements.lunchStart.value;
+    const lunchEnd = form.elements.lunchEnd.value;
+    if (lunchEnabled && !(form.elements.startTime.value < lunchStart && lunchStart < lunchEnd && lunchEnd < form.elements.endTime.value)) {
+      state.textContent = 'Set lunch start and lunch end between the work start and end times.';
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+      return;
+    }
+    const values = {
+      employee_id: form.elements.employeeId.value,
+      start_date: form.elements.startDate.value,
+      end_date: form.elements.endDate.value,
+      working_days: workingDays,
+      start_time: form.elements.startTime.value,
+      end_time: form.elements.endTime.value,
+      lunch_enabled: lunchEnabled,
+      lunch_start: lunchEnabled ? lunchStart : null,
+      lunch_end: lunchEnabled ? lunchEnd : null,
+      timezone: 'Asia/Manila',
+      is_active: form.elements.isActive.value === 'true',
+    };
+    try {
+      const client = getSupabaseClient();
+      let result;
+      if (form.elements.scheduleId.value) {
+        result = await client.from('employee_schedules').update(values).eq('id', form.elements.scheduleId.value);
+      } else {
+        values.created_by = adminUser.id;
+        result = await client.from('employee_schedules').insert(values);
+      }
+      if (result.error) throw result.error;
+      state.textContent = 'Schedule saved.';
+      state.classList.remove('hidden', 'error-text');
+      resetForm();
+      await loadDashboardData();
+    } catch (error) {
+      state.textContent = `Could not save schedule: ${error.message}`;
+      state.classList.remove('hidden');
+      state.classList.add('error-text');
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    const editButton = event.target instanceof Element ? event.target.closest('.edit-employee-schedule') : null;
+    if (editButton) {
+      const schedule = employeeSchedules.find((row) => row.id === editButton.dataset.scheduleId);
+      if (!schedule) return;
+      form.elements.scheduleId.value = schedule.id;
+      form.elements.employeeId.value = schedule.employee_id;
+      form.elements.startDate.value = schedule.start_date;
+      form.elements.endDate.value = schedule.end_date;
+      form.elements.startTime.value = String(schedule.start_time).slice(0, 5);
+      form.elements.endTime.value = String(schedule.end_time).slice(0, 5);
+      form.elements.lunchEnabled.checked = Boolean(schedule.lunch_enabled);
+      form.elements.lunchStart.value = schedule.lunch_start ? String(schedule.lunch_start).slice(0, 5) : '';
+      form.elements.lunchEnd.value = schedule.lunch_end ? String(schedule.lunch_end).slice(0, 5) : '';
+      form.elements.lunchStart.disabled = !schedule.lunch_enabled;
+      form.elements.lunchEnd.disabled = !schedule.lunch_enabled;
+      form.elements.isActive.value = String(schedule.is_active);
+      form.querySelectorAll('input[name="workingDays"]').forEach((input) => {
+        input.checked = (schedule.working_days || []).includes(input.value);
+      });
+      setActiveSection('schedules');
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const toggleButton = event.target instanceof Element ? event.target.closest('.employee-schedule-toggle') : null;
+    if (!toggleButton) return;
+    const schedule = employeeSchedules.find((row) => row.id === toggleButton.dataset.scheduleId);
+    if (!schedule) return;
+    (async () => {
+      try {
+        const { error } = await getSupabaseClient()
+          .from('employee_schedules')
+          .update({ is_active: !schedule.is_active })
+          .eq('id', schedule.id);
+        if (error) throw error;
+        await loadDashboardData();
+      } catch (error) {
+        showToast(`Could not update schedule: ${error.message}`, true);
+      }
+    })();
+  });
 }
 
 function setActiveSection(name) {
@@ -1761,8 +2016,8 @@ function setActiveSection(name) {
       dashboard: 'Dashboard',
       analytics: 'Analytics',
       blocking: 'Website Blocking Schedule',
+      schedules: 'Schedules',
       assign: 'Assign Employee',
-      requests: 'Request Change',
       employees: 'Employee',
       laptops: 'Laptop',
       tickets: 'Ticket',
@@ -1775,6 +2030,15 @@ function setActiveSection(name) {
 }
 
 function setupDashboardInteractions() {
+  setupEmployeeScheduleInteractions();
+  document.getElementById('analyticsWebsiteTable')?.addEventListener('click', (event) => {
+    const button = event.target.closest('.analytics-employee-link');
+    if (button) renderAnalyticsEmployeeDetail(button.dataset.analyticsEmployeeId);
+  });
+  document.getElementById('closeAnalyticsEmployeeDetail')?.addEventListener('click', () => {
+    selectedAnalyticsEmployeeId = null;
+    document.getElementById('analyticsEmployeeDetail').classList.add('hidden');
+  });
   document.querySelectorAll('.nav-link[data-section]').forEach((button) => {
     button.addEventListener('click', () => setActiveSection(button.dataset.section));
   });
@@ -2703,33 +2967,6 @@ function setupDashboardInteractions() {
       button.disabled = false;
     }
   });
-  document.getElementById('assignTicketBtn')?.addEventListener('click', async () => {
-    if (!selectedTicket || !supabaseClient) return;
-    const button = document.getElementById('assignTicketBtn');
-    const targetProfileId = document.getElementById('ticketAssignedStaff').value || null;
-    button.disabled = true;
-    try {
-      const { error } = await supabaseClient.rpc('assign_ticket_staff', {
-        target_ticket_id: selectedTicket.id,
-        target_profile_id: targetProfileId,
-      });
-      if (error) throw error;
-      const { data: updatedTicket, error: ticketError } = await supabaseClient.from('tickets')
-        .select('id,ticket_number,profile_id,employee_id,laptop_id,subject,issue_category,priority,assigned_to,status,description,created_at,updated_at,profile:profiles!tickets_profile_id_fkey(full_name,email),employee:employees!tickets_employee_id_fkey(user_id),laptop:laptops!tickets_laptop_id_fkey(laptop_id,device_registration_id,model),assigned_staff:profiles!tickets_assigned_to_fkey(full_name)')
-        .eq('id', selectedTicket.id)
-        .single();
-      if (ticketError) throw ticketError;
-      selectedTicket = updatedTicket;
-      renderTicketInfo(selectedTicket);
-      document.getElementById('ticketDetailState').textContent = 'Ticket assignment updated.';
-      showToast('Ticket assignment updated.');
-      await Promise.all([loadTicketAssignmentHistory(), loadTickets()]);
-    } catch (error) {
-      document.getElementById('ticketDetailState').textContent = `Ticket assignment failed: ${error.message}`;
-    } finally {
-      button.disabled = false;
-    }
-  });
   document.getElementById('internalNoteForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!selectedTicket || !supabaseClient || !adminUser) return;
@@ -2880,46 +3117,6 @@ function setupDashboardInteractions() {
     }
   });
 
-  document.getElementById('requestTable')?.addEventListener('click', (event) => {
-    const button = event.target.closest('.review-change-request');
-    if (!button) return;
-    selectedChangeRequest = changeRequests.find((request) => request.id === button.dataset.requestId);
-    if (!selectedChangeRequest) return;
-    document.getElementById('requestReviewDetails').innerHTML = `
-      <dl class="details-grid">
-        <div><dt>Employee</dt><dd>${escapeHtml(selectedChangeRequest.employeeName)}</dd></div>
-        <div><dt>Request</dt><dd>${escapeHtml(selectedChangeRequest.request_type)}</dd></div>
-        <div><dt>Status</dt><dd>${escapeHtml(selectedChangeRequest.status)}</dd></div>
-        <div><dt>Reason</dt><dd>${escapeHtml(selectedChangeRequest.reason)}</dd></div>
-      </dl>`;
-    document.getElementById('requestReviewRemarks').value = selectedChangeRequest.administrator_remarks || '';
-    document.getElementById('requestReviewState').classList.add('hidden');
-    document.getElementById('approveRequestBtn').disabled = selectedChangeRequest.status !== 'Pending';
-    document.getElementById('rejectRequestBtn').disabled = selectedChangeRequest.status !== 'Pending';
-    document.getElementById('requestReviewModal').classList.remove('hidden');
-  });
-  const reviewRequest = async (status) => {
-    if (!selectedChangeRequest) return;
-    const state = document.getElementById('requestReviewState');
-    try {
-      const { error } = await getSupabaseClient().from('laptop_change_requests')
-        .update({
-          status,
-          administrator_remarks: document.getElementById('requestReviewRemarks').value.trim() || null,
-        }).eq('id', selectedChangeRequest.id);
-      if (error) throw error;
-      await writeChangeLog(`${status} change request`, 'Change requests', selectedChangeRequest.id);
-      document.getElementById('requestReviewModal').classList.add('hidden');
-      await loadDashboardData();
-      showToast(`Request ${status.toLowerCase()}.`);
-    } catch (error) {
-      state.textContent = `Request review failed: ${error.message}`;
-      state.classList.remove('hidden');
-      state.classList.add('error-text');
-    }
-  };
-  document.getElementById('approveRequestBtn')?.addEventListener('click', () => reviewRequest('Approved'));
-  document.getElementById('rejectRequestBtn')?.addEventListener('click', () => reviewRequest('Rejected'));
 }
 
 function closeUpdateLogsModal() {

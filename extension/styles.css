@@ -54,6 +54,37 @@ body::-webkit-scrollbar {
   gap: 12px;
 }
 
+.usage-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.usage-summary-grid > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt);
+}
+
+.usage-summary-grid span {
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.usage-summary-grid strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+}
+
 .popup-header {
   position: sticky;
   top: -12px;

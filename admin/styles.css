@@ -228,8 +228,8 @@ textarea,
   border: 1px solid var(--border);
   background: var(--bg-soft);
   color: var(--text);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
 .password-row {
@@ -246,8 +246,8 @@ textarea,
 .primary-btn,
 .text-btn {
   border: none;
-  border-radius: 12px;
-  padding: 10px 16px;
+  border-radius: 10px;
+  padding: 9px 14px;
   transition: all 0.2s ease;
 }
 
@@ -389,7 +389,7 @@ textarea,
 
 .sidebar-nav {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   min-height: 0;
   flex: 1 1 auto;
   align-content: start;
@@ -404,14 +404,27 @@ textarea,
   border: none;
   text-align: left;
   color: rgba(255, 255, 255, 0.8);
-  padding: 12px 14px;
-  border-radius: 10px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .nav-link.active {
   background: rgba(255, 255, 255, 0.08);
   color: white;
+}
+
+.nav-link:hover,
+.nav-link:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  outline: none;
+}
+
+.nav-link.active {
+  box-shadow: inset 3px 0 0 #60a5fa;
 }
 
 .sidebar-meta {
@@ -444,7 +457,7 @@ textarea,
 }
 
 .main-panel {
-  padding: 28px;
+  padding: 24px;
   min-width: 0;
   height: 100vh;
   overflow-y: auto;
@@ -456,12 +469,12 @@ textarea,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .topbar-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -537,9 +550,74 @@ textarea,
   white-space: nowrap;
 }
 
-.philippines-clock {
-  color: var(--text);
+.dashboard-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
+}
+
+.dashboard-overview .stats-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: stretch;
+}
+
+.dashboard-clock-widget {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(145deg, var(--surface), var(--accent-soft));
+  box-shadow: var(--shadow);
+}
+
+.dashboard-clock-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 2rem;
+}
+
+.dashboard-clock-widget > div:nth-child(2) {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  text-align: center;
+}
+
+.dashboard-clock-label,
+.dashboard-clock-zone {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.dashboard-clock-widget strong {
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
+}
+
+.dashboard-clock-widget #dashboardClockDate {
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.dashboard-clock-zone {
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .sync-icon {
@@ -586,7 +664,7 @@ textarea,
 .module-panel.active {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
 }
 
 .stats-grid {
@@ -594,6 +672,27 @@ textarea,
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 18px;
   margin-bottom: 0;
+}
+
+#dashboard .stats-grid {
+  gap: 12px;
+}
+
+#dashboard .stat-card {
+  gap: 8px;
+  padding: 15px 17px;
+  border-radius: 15px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+#dashboard .metric-label {
+  line-height: 1.35;
+}
+
+#dashboard .metric-value {
+  font-size: clamp(1.5rem, 2.4vw, 1.9rem);
+  line-height: 1.1;
+  font-weight: 750;
 }
 
 .stat-card,
@@ -605,9 +704,9 @@ textarea,
 }
 
 .stat-card {
-  padding: 18px 20px;
+  padding: 16px 18px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .metric-label,
@@ -630,8 +729,46 @@ textarea,
 
 .content-grid {
   display: grid;
-  gap: 20px;
+  gap: 16px;
   margin-bottom: 0;
+}
+
+#dashboard .panel-card {
+  padding: 18px;
+  border-radius: 16px;
+}
+
+#dashboard .card-header {
+  margin-bottom: 12px;
+}
+
+#dashboard .bar-chart {
+  height: 160px;
+}
+
+#dashboard .donut-legend {
+  gap: 14px;
+}
+
+#dashboard .ticket-summary-total {
+  min-height: 132px;
+  border-radius: 14px;
+}
+
+#dashboard .ticket-summary-total strong {
+  font-size: 2.4rem;
+}
+
+#dashboard .ticket-status-list {
+  gap: 8px;
+}
+
+#dashboard .ticket-status-row {
+  gap: 4px;
+}
+
+#dashboard .ticket-status-track {
+  height: 6px;
 }
 
 .two-col {
@@ -639,9 +776,23 @@ textarea,
 }
 
 .panel-card {
-  padding: 20px;
+  padding: 16px;
   min-width: 0;
   overflow-x: auto;
+  border-radius: 16px;
+}
+
+.module-panel .card-header {
+  margin-bottom: 12px;
+}
+
+.module-panel .filter-row {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.module-panel .actions-row {
+  gap: 10px;
 }
 
 .blocking-rule-actions {
@@ -873,6 +1024,67 @@ textarea,
   display: block;
   margin-top: 6px;
   color: var(--text-soft);
+}
+
+.analytics-employee-link {
+  display: grid;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analytics-employee-link small {
+  color: var(--text-soft);
+  font-weight: 400;
+}
+
+.analytics-employee-link:hover,
+.analytics-employee-link:focus-visible {
+  text-decoration: underline;
+}
+
+.analytics-employee-detail {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-alt);
+}
+
+.analytics-employee-detail .stats-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 18px;
+}
+
+.analytics-employee-detail .stat-card {
+  padding: 14px;
+  gap: 8px;
+}
+
+.analytics-employee-detail .metric-value {
+  overflow-wrap: anywhere;
+  font-size: clamp(1.05rem, 2vw, 1.5rem);
+}
+
+.analytics-employee-detail-content {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.7fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.analytics-employee-detail-content h4 {
+  margin: 0 0 12px;
+}
+
+.analytics-record-table {
+  min-width: 650px;
   font-size: 0.72rem;
 }
 
@@ -910,13 +1122,135 @@ textarea,
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .form-grid label {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-soft);
+}
+
+.schedule-working-days,
+.schedule-lunch-fields {
+  min-width: 0;
+  margin: 0;
+}
+
+.schedule-field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.schedule-field-grid label {
+  min-width: 0;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.schedule-field-grid input,
+.schedule-field-grid select,
+.schedule-lunch-fields input[type="time"] {
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.schedule-field-grid input:focus,
+.schedule-field-grid select:focus,
+.schedule-lunch-fields input[type="time"]:focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--accent-soft);
+}
+
+.schedule-working-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-soft);
+}
+
+.schedule-working-days legend,
+.schedule-lunch-fields legend {
+  grid-column: 1 / -1;
+  padding: 0 4px;
+  margin-bottom: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.schedule-working-days label,
+.schedule-lunch-fields label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.schedule-working-days label {
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.schedule-working-days label input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.schedule-working-days label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.schedule-lunch-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-soft);
+}
+
+.schedule-lunch-fields label:first-of-type {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.schedule-lunch-fields label:not(:first-of-type) {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .analytics-employee-filter {
@@ -945,6 +1279,29 @@ textarea,
   grid-column: span 2;
 }
 
+.span-3 {
+  grid-column: span 3;
+}
+
+.schedule-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.schedule-actions {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 0;
+}
+
+.schedule-actions .primary-btn,
+.schedule-actions .secondary-btn {
+  min-height: 40px;
+  padding-inline: 16px;
+}
+
 .days-row {
   display: flex;
   flex-wrap: wrap;
@@ -958,13 +1315,63 @@ textarea,
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
 }
 
 .days-row input {
   width: auto;
   margin: 0;
   accent-color: var(--accent);
+}
+
+.main-panel .module-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+.main-panel .module-panel select {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 9px;
+}
+
+.main-panel .module-panel input[type="checkbox"],
+.main-panel .module-panel input[type="radio"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.main-panel .module-panel textarea {
+  min-height: 76px;
+  padding: 9px 10px;
+  border-radius: 9px;
+}
+
+.main-panel .module-panel label {
+  gap: 6px;
+}
+
+.module-panel .filter-row select {
+  width: auto;
+  min-width: 150px;
+  max-width: 220px;
+}
+
+.module-panel .filter-row input[type="search"] {
+  min-height: 38px;
+}
+
+.module-panel .analytics-employee-filter select {
+  width: 100%;
+  max-width: 280px;
+}
+
+.module-panel .actions-row .primary-btn,
+.module-panel .actions-row .secondary-btn,
+.module-panel > .panel-card .primary-btn,
+.module-panel > .panel-card .secondary-btn {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 9px;
 }
 
 .days-row label {
@@ -1038,16 +1445,151 @@ table {
 }
 
 th, td {
-  padding: 12px 10px;
+  padding: 10px 9px;
   border-bottom: 1px solid var(--border);
   text-align: left;
 }
 
 th {
   color: var(--text-soft);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
+}
+
+.schedule-table {
+  width: 100%;
+  min-width: 940px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.schedule-table th,
+.schedule-table td {
+  padding: 11px 10px;
+  vertical-align: middle;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.schedule-table th {
+  background: var(--bg-soft);
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+
+.schedule-table td {
+  font-size: 0.82rem;
+}
+
+.schedule-table th:last-child,
+.schedule-table td:last-child {
+  border-right: 0;
+}
+
+.schedule-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.schedule-table tbody tr {
+  transition: background 140ms ease;
+}
+
+.schedule-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.schedule-table tbody td[colspan] {
+  padding: 22px 12px;
+  color: var(--text-soft);
+  text-align: center;
+}
+
+.schedule-table th:nth-child(1) { width: 17%; }
+.schedule-table th:nth-child(2) { width: 15%; }
+.schedule-table th:nth-child(3) { width: 18%; }
+.schedule-table th:nth-child(4) { width: 13%; }
+.schedule-table th:nth-child(5) { width: 12%; }
+.schedule-table th:nth-child(6) { width: 10%; }
+.schedule-table th:nth-child(7) { width: 15%; }
+
+.schedule-employee {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.schedule-employee > div {
+  min-width: 0;
+}
+
+.schedule-avatar {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.schedule-employee strong,
+.schedule-date strong,
+.schedule-time strong {
+  display: block;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.schedule-employee small,
+.schedule-date small,
+.schedule-time small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-soft);
+  line-height: 1.25;
+}
+
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.schedule-day {
+  min-width: 27px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.schedule-actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.schedule-actions-cell .text-btn {
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  font-size: 0.74rem;
+  white-space: nowrap;
 }
 
 .filter-row {
@@ -1202,6 +1744,14 @@ th {
   color: var(--text-soft);
 }
 
+.ticket-status-field strong {
+  color: var(--text);
+}
+
+.ticket-status-field small {
+  font-size: 0.78rem;
+}
+
 .ticket-status-field select,
 .message-form textarea {
   border: 1px solid var(--border);
@@ -1209,6 +1759,39 @@ th {
   background: var(--bg-soft);
   color: var(--text);
   padding: 10px 12px;
+}
+
+@media (max-width: 600px) {
+  .dashboard-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-overview .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-clock-widget {
+    gap: 10px;
+    padding: 16px;
+  }
+
+  .dashboard-clock-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+    font-size: 1.65rem;
+  }
+
+  .dashboard-clock-zone {
+    align-self: center;
+    font-size: 0.68rem;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 900px) {
+  .dashboard-overview {
+    grid-template-columns: 1fr;
+  }
 }
 
 .internal-notes {
@@ -1897,7 +2480,23 @@ body.dark-mode.login-page .eye-toggle-login {
     grid-template-columns: 1fr;
   }
 
+  .schedule-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-lunch-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-lunch-fields label:first-of-type {
+    grid-column: 1 / -1;
+  }
+
   .ticket-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-employee-detail-content {
     grid-template-columns: 1fr;
   }
 
@@ -1964,9 +2563,37 @@ body.dark-mode.login-page .eye-toggle-login {
   .sidebar-collapsed .app-shell {
     grid-template-columns: 1fr;
   }
+
+  .schedule-working-days {
+    grid-template-columns: repeat(4, minmax(58px, 1fr));
+  }
+
+  .schedule-lunch-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .schedule-lunch-fields legend {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 620px) {
+  .schedule-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-lunch-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-lunch-fields label:first-of-type {
+    grid-column: auto;
+  }
+
+  .schedule-working-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -1975,6 +2602,10 @@ body.dark-mode.login-page .eye-toggle-login {
 
   .topbar-actions {
     justify-content: flex-start;
+  }
+
+  #dashboard .panel-card {
+    padding: 15px;
   }
 
   .donut-legend {
