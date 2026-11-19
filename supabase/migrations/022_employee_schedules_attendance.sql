@@ -52,13 +52,9 @@ create table if not exists public.employee_schedules (
   ),
   check (timezone = 'Asia/Manila'),
   check (
-    working_days is not null
-    and cardinality(working_days) between 1 and 7
-    and not exists (
-      select 1
-      from unnest(working_days) day_name
-      where day_name is null or day_name <> all (array['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])
-    )
+    cardinality(working_days) between 1 and 7
+    and array_position(working_days, null) is null
+    and working_days <@ array['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
   )
 );
 
