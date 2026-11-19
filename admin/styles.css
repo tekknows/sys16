@@ -2140,31 +2140,10 @@ th {
   color: var(--danger, #c2413b);
 }
 
-.blocking-template-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.blocking-template-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 8px 10px;
-  background: var(--surface);
-}
-
-.blocking-template-option input {
-  width: auto;
-  margin: 0;
-}
-
-.blocking-template-option span {
-  overflow-wrap: anywhere;
+.blocking-template-manager {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
 }
 
 .settings-tabs {

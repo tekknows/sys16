@@ -24,7 +24,7 @@ let directoryLaptops = [];
 let directoryAssignments = [];
 let blockingRules = [];
 let employeeSchedules = [];
-let defaultBlockingWebsites = [];
+let defaultBlockingTemplates = [];
 let activityLogs = [];
 let notifications = [];
 let deviceRegistrations = [];
@@ -91,28 +91,39 @@ function renderBlockingSchedulePreview(employeeId, elementId) {
   preview.classList.remove('error-text');
 }
 
-function renderDefaultBlockingWebsites() {
+function renderDefaultBlockingTemplates(selectedTemplateId = null) {
+  const templateSelect = document.getElementById('bulkBlockingTemplate');
+  const currentSelection = selectedTemplateId ?? templateSelect?.value ?? '';
   const table = document.getElementById('defaultBlockingWebsiteTable');
   if (table) {
-    table.innerHTML = defaultBlockingWebsites.length ? defaultBlockingWebsites.map((entry) => `
+    table.innerHTML = defaultBlockingTemplates.length ? defaultBlockingTemplates.map((template) => `
       <tr>
-        <td>${escapeHtml(entry.domain)}</td>
-        <td><span class="status-pill ${entry.is_active ? 'success' : 'neutral'}">${entry.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td>${escapeHtml(template.name)}</td>
+        <td>${escapeHtml(template.websites.map((website) => website.domain).join(', '))}</td>
+        <td><span class="status-pill ${template.is_active ? 'success' : 'neutral'}">${template.is_active ? 'Active' : 'Inactive'}</span></td>
         <td><div class="blocking-rule-actions">
-          <button class="text-btn edit-default-blocking" type="button" data-template-id="${escapeHtml(entry.id)}">Edit</button>
-          <button class="text-btn toggle-default-blocking" type="button" data-template-id="${escapeHtml(entry.id)}">${entry.is_active ? 'Deactivate' : 'Activate'}</button>
-          <button class="text-btn delete-default-blocking" type="button" data-template-id="${escapeHtml(entry.id)}">Delete</button>
+          <button class="text-btn edit-default-blocking" type="button" data-template-id="${escapeHtml(template.id)}">Edit</button>
+          <button class="text-btn toggle-default-blocking" type="button" data-template-id="${escapeHtml(template.id)}">${template.is_active ? 'Deactivate' : 'Activate'}</button>
+          <button class="text-btn delete-default-blocking" type="button" data-template-id="${escapeHtml(template.id)}">Delete</button>
         </div></td>
-      </tr>`).join('') : '<tr><td colspan="3">No default websites configured.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="4">No default website templates configured.</td></tr>';
   }
-  const options = document.getElementById('bulkBlockingTemplateOptions');
-  if (options) {
-    const activeEntries = defaultBlockingWebsites.filter((entry) => entry.is_active);
-    options.innerHTML = activeEntries.length ? activeEntries.map((entry) => `
-      <label class="blocking-template-option">
-        <input type="checkbox" name="templateIds" value="${escapeHtml(entry.id)}" />
-        <span>${escapeHtml(entry.domain)}</span>
-      </label>`).join('') : '<p class="panel-subtitle">No active default websites are available.</p>';
+  const select = templateSelect;
+  if (select) {
+    const activeTemplates = defaultBlockingTemplates.filter((template) => template.is_active);
+    select.innerHTML = `<option value="">Select a template</option>${activeTemplates.map((template) => (
+      `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}</option>`
+    )).join('')}`;
+    if (activeTemplates.some((template) => template.id === currentSelection)) {
+      select.value = currentSelection;
+    }
+  }
+  const preview = document.getElementById('bulkBlockingTemplatePreview');
+  const selectedTemplate = defaultBlockingTemplates.find((template) => template.id === (select?.value || selectedTemplateId));
+  if (preview) {
+    preview.textContent = selectedTemplate
+      ? selectedTemplate.websites.filter((website) => website.is_active).map((website) => website.domain).join(', ') || 'This template has no active websites.'
+      : 'Select a template to preview its websites.';
   }
 }
 
@@ -1002,12 +1013,24 @@ async function loadDashboardData() {
     if (scheduleResult.error && !/employee_schedules/i.test(scheduleResult.error.message)) throw scheduleResult.error;
     employeeSchedules = scheduleResult.error ? [] : (scheduleResult.data || []);
     const defaultWebsiteResult = await client.from('default_blocking_websites')
-      .select('id,domain,is_active,created_at')
+      .select('id,template_id,domain,is_active')
       .order('domain', { ascending: true });
-    if (defaultWebsiteResult.error) {
-      throw new Error(`Default website list could not be loaded. Run migration 026_schedule_based_website_blocking.sql. ${defaultWebsiteResult.error.message}`);
+    const defaultTemplateResult = await client.from('default_blocking_templates')
+      .select('id,name,is_active,created_at')
+      .order('name', { ascending: true });
+    if (defaultWebsiteResult.error || defaultTemplateResult.error) {
+      const error = defaultWebsiteResult.error || defaultTemplateResult.error;
+      throw new Error(`Default website templates could not be loaded. Run migration 027_named_bulk_blocking_templates.sql. ${error.message}`);
     }
-    defaultBlockingWebsites = defaultWebsiteResult.data || [];
+    const websitesByTemplate = new Map();
+    (defaultWebsiteResult.data || []).forEach((website) => {
+      if (!websitesByTemplate.has(website.template_id)) websitesByTemplate.set(website.template_id, []);
+      websitesByTemplate.get(website.template_id).push(website);
+    });
+    defaultBlockingTemplates = (defaultTemplateResult.data || []).map((template) => ({
+      ...template,
+      websites: websitesByTemplate.get(template.id) || [],
+    }));
     await loadTicketCategories(client);
     const [employeeResult, profileResult, roleResult, , assignmentResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
@@ -1073,7 +1096,7 @@ async function loadDashboardData() {
     renderActivityList();
     renderNotifications();
     renderBlockingTable();
-    renderDefaultBlockingWebsites();
+    renderDefaultBlockingTemplates();
     renderBlockingSchedulePreview(document.getElementById('blockingTargetEmployee')?.value, 'singleBlockingSchedulePreview');
     renderBlockingSchedulePreview(document.getElementById('bulkBlockingTargetEmployee')?.value, 'bulkBlockingSchedulePreview');
     renderAssignmentTable();
@@ -2676,7 +2699,8 @@ function setupDashboardInteractions() {
     const submit = form.querySelector('button[type="submit"]');
     const employeeId = form.elements.employeeId.value;
     const employee = directoryEmployees.find((row) => row.id === employeeId && row.active);
-    const templateIds = [...form.querySelectorAll('input[name="templateIds"]:checked')].map((input) => input.value);
+    const templateId = form.elements.templateId.value;
+    const template = defaultBlockingTemplates.find((row) => row.id === templateId && row.is_active);
     state.classList.add('hidden');
     if (!employee || !getEmployeeSchedule(employeeId)) {
       state.textContent = 'No active employee schedule found. Please assign an employee schedule first.';
@@ -2684,8 +2708,8 @@ function setupDashboardInteractions() {
       state.classList.add('error-text');
       return;
     }
-    if (!templateIds.length) {
-      state.textContent = 'Select at least one active default website.';
+    if (!template) {
+      state.textContent = 'Select an active default website template.';
       state.classList.remove('hidden');
       state.classList.add('error-text');
       return;
@@ -2695,16 +2719,17 @@ function setupDashboardInteractions() {
     try {
       const { data, error } = await getSupabaseClient().rpc('assign_default_blocking_websites', {
         p_employee_id: employee.id,
-        p_template_ids: templateIds,
+        p_template_ids: [template.id],
       });
       if (error) throw error;
       saved = true;
-      form.querySelectorAll('input[name="templateIds"]').forEach((input) => { input.checked = false; });
+      form.elements.templateId.value = '';
+      renderDefaultBlockingTemplates('');
       await loadDashboardData();
-      state.textContent = `Assigned ${Number(data)} website${Number(data) === 1 ? '' : 's'} to ${employee.name}.`;
+      state.textContent = `Assigned ${Number(data)} website${Number(data) === 1 ? '' : 's'} from "${template.name}" to ${employee.name}.`;
       state.classList.remove('hidden', 'error-text');
       try {
-        await writeChangeLog('Assigned default blocking websites', 'Website Blocking', `${employee.name} · ${Number(data)} websites`);
+        await writeChangeLog('Assigned default website template', 'Website Blocking', `${template.name} · ${employee.name} · ${Number(data)} websites`);
       } catch (error) {
         console.error('[LOCTIV AUDIT] Website policies were assigned but could not be logged:', error);
         state.textContent += ' Policies were assigned, but the audit log could not be saved.';
@@ -2723,52 +2748,78 @@ function setupDashboardInteractions() {
   document.getElementById('bulkBlockingTargetEmployee')?.addEventListener('change', (event) => {
     renderBlockingSchedulePreview(event.currentTarget.value, 'bulkBlockingSchedulePreview');
   });
+  document.getElementById('bulkBlockingTemplate')?.addEventListener('change', (event) => {
+    renderDefaultBlockingTemplates(event.currentTarget.value);
+  });
   const defaultWebsiteForm = document.getElementById('defaultBlockingWebsiteForm');
   if (defaultWebsiteForm) {
     const resetDefaultWebsiteForm = () => {
       defaultWebsiteForm.reset();
       defaultWebsiteForm.elements.templateId.value = '';
-      defaultWebsiteForm.querySelector('button[type="submit"]').textContent = 'Add default website';
+      defaultWebsiteForm.querySelector('button[type="submit"]').textContent = 'Save website template';
       document.getElementById('cancelDefaultBlockingEditBtn').classList.add('hidden');
     };
     document.getElementById('cancelDefaultBlockingEditBtn')?.addEventListener('click', resetDefaultWebsiteForm);
     defaultWebsiteForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const state = document.getElementById('defaultBlockingWebsiteState');
-      const domain = normalizeBlockingDomain(defaultWebsiteForm.elements.domain.value);
+      const name = defaultWebsiteForm.elements.templateName.value.trim();
+      const domains = [...new Set(defaultWebsiteForm.elements.domains.value
+        .split(/[\r\n,;]+/)
+        .map(normalizeBlockingDomain)
+        .filter(Boolean))];
       const templateId = defaultWebsiteForm.elements.templateId.value;
-      if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain)) {
-        defaultWebsiteForm.elements.domain.setCustomValidity('Enter a valid website domain without a path.');
-        defaultWebsiteForm.elements.domain.reportValidity();
+      const domainPattern = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+      const rawDomains = defaultWebsiteForm.elements.domains.value
+        .split(/[\r\n,;]+/)
+        .map(normalizeBlockingDomain)
+        .filter(Boolean);
+      if (!name || name.length > 100) {
+        defaultWebsiteForm.elements.templateName.setCustomValidity('Enter a template name with no more than 100 characters.');
+        defaultWebsiteForm.elements.templateName.reportValidity();
         return;
       }
-      defaultWebsiteForm.elements.domain.setCustomValidity('');
+      defaultWebsiteForm.elements.templateName.setCustomValidity('');
+      if (!domains.length || rawDomains.some((domain) => !domainPattern.test(domain))) {
+        defaultWebsiteForm.elements.domains.setCustomValidity('Enter valid domains separated by commas or new lines.');
+        defaultWebsiteForm.elements.domains.reportValidity();
+        return;
+      }
+      defaultWebsiteForm.elements.domains.setCustomValidity('');
+      if (domains.length !== rawDomains.length) {
+        state.textContent = 'Remove duplicate domains from this template.';
+        state.classList.remove('hidden');
+        state.classList.add('error-text');
+        return;
+      }
       const submit = defaultWebsiteForm.querySelector('button[type="submit"]');
       submit.disabled = true;
       let saved = false;
       state.classList.add('hidden');
       try {
-        const query = templateId
-          ? await getSupabaseClient().from('default_blocking_websites').update({ domain, updated_at: new Date().toISOString() }).eq('id', templateId)
-          : await getSupabaseClient().from('default_blocking_websites').insert({ domain, created_by: adminUser.id });
-        if (query.error?.code === '23505') throw new Error('That domain is already in the default website list.');
-        if (query.error) throw query.error;
+        const { error } = await getSupabaseClient().rpc('save_default_blocking_template', {
+          p_template_id: templateId || null,
+          p_name: name,
+          p_domains: domains,
+        });
+        if (error?.code === '23505') throw new Error('A template with that name already exists.');
+        if (error) throw error;
         saved = true;
         resetDefaultWebsiteForm();
         await loadDashboardData();
-        state.textContent = `${domain} saved to the default website list.`;
+        state.textContent = `"${name}" saved with ${domains.length} website${domains.length === 1 ? '' : 's'}.`;
         state.classList.remove('hidden', 'error-text');
         try {
-          await writeChangeLog(templateId ? 'Updated default blocking website' : 'Added default blocking website', 'Website Blocking', domain);
+          await writeChangeLog(templateId ? 'Updated default website template' : 'Created default website template', 'Website Blocking', `${name} · ${domains.join(', ')}`);
         } catch (error) {
-          console.error('[LOCTIV AUDIT] Default website was saved but could not be logged:', error);
-          state.textContent += ' The website was saved, but the audit log could not be saved.';
+          console.error('[LOCTIV AUDIT] Default website template was saved but could not be logged:', error);
+          state.textContent += ' The template was saved, but the audit log could not be saved.';
           state.classList.add('error-text');
         }
       } catch (error) {
         state.textContent = saved
-          ? `Default website was saved, but the dashboard could not refresh: ${error.message}`
-          : `Default website could not be saved: ${error.message}`;
+          ? `Website template was saved, but the dashboard could not refresh: ${error.message}`
+          : `Website template could not be saved: ${error.message}`;
         state.classList.remove('hidden');
         state.classList.add('error-text');
       } finally {
@@ -2779,26 +2830,28 @@ function setupDashboardInteractions() {
   document.addEventListener('click', (event) => {
     const editTemplateButton = event.target instanceof Element ? event.target.closest('.edit-default-blocking') : null;
     if (editTemplateButton) {
-      const template = defaultBlockingWebsites.find((row) => row.id === editTemplateButton.dataset.templateId);
+      const template = defaultBlockingTemplates.find((row) => row.id === editTemplateButton.dataset.templateId);
       if (!template) return;
       const form = document.getElementById('defaultBlockingWebsiteForm');
       form.elements.templateId.value = template.id;
-      form.elements.domain.value = template.domain;
-      form.querySelector('button[type="submit"]').textContent = 'Save default website';
+      form.elements.templateName.value = template.name;
+      form.elements.domains.value = template.websites.map((website) => website.domain).join('\n');
+      form.querySelector('button[type="submit"]').textContent = 'Update website template';
       document.getElementById('cancelDefaultBlockingEditBtn').classList.remove('hidden');
       form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      form.elements.domain.focus({ preventScroll: true });
+      form.elements.templateName.focus({ preventScroll: true });
       return;
     }
     const toggleTemplateButton = event.target instanceof Element ? event.target.closest('.toggle-default-blocking') : null;
     if (toggleTemplateButton) {
-      const template = defaultBlockingWebsites.find((row) => row.id === toggleTemplateButton.dataset.templateId);
+      const template = defaultBlockingTemplates.find((row) => row.id === toggleTemplateButton.dataset.templateId);
       if (!template) return;
       (async () => {
         let updated = false;
         try {
-          const { error } = await getSupabaseClient().from('default_blocking_websites')
-            .update({ is_active: !template.is_active, updated_at: new Date().toISOString() }).eq('id', template.id);
+          const { error } = await getSupabaseClient().from('default_blocking_templates')
+            .update({ is_active: !template.is_active, updated_at: new Date().toISOString() })
+            .eq('id', template.id);
           if (error) throw error;
           updated = true;
           await loadDashboardData();
@@ -2809,24 +2862,24 @@ function setupDashboardInteractions() {
           return;
         }
         try {
-          await writeChangeLog(`${template.is_active ? 'Deactivated' : 'Activated'} default blocking website`, 'Website Blocking', template.domain);
+          await writeChangeLog(`${template.is_active ? 'Deactivated' : 'Activated'} default website template`, 'Website Blocking', template.name);
         } catch (error) {
           console.error('[LOCTIV AUDIT] Default website status changed but could not be logged:', error);
           showToast('Default website status changed, but the audit log could not be saved.', true);
           return;
         }
-        showToast(`Default website ${template.is_active ? 'deactivated' : 'activated'}.`);
+        showToast(`Website template ${template.is_active ? 'deactivated' : 'activated'}.`);
       })();
       return;
     }
     const deleteTemplateButton = event.target instanceof Element ? event.target.closest('.delete-default-blocking') : null;
     if (deleteTemplateButton) {
-      const template = defaultBlockingWebsites.find((row) => row.id === deleteTemplateButton.dataset.templateId);
-      if (!template || !window.confirm(`Delete ${template.domain} from the default website list? Existing employee policies will remain unchanged.`)) return;
+      const template = defaultBlockingTemplates.find((row) => row.id === deleteTemplateButton.dataset.templateId);
+      if (!template || !window.confirm(`Delete the "${template.name}" template and its saved domains? Existing employee policies will remain unchanged.`)) return;
       (async () => {
         let deleted = false;
         try {
-          const { error } = await getSupabaseClient().from('default_blocking_websites').delete().eq('id', template.id);
+          const { error } = await getSupabaseClient().from('default_blocking_templates').delete().eq('id', template.id);
           if (error) throw error;
           deleted = true;
           await loadDashboardData();
@@ -2837,7 +2890,7 @@ function setupDashboardInteractions() {
           return;
         }
         try {
-          await writeChangeLog('Deleted default blocking website', 'Website Blocking', template.domain);
+          await writeChangeLog('Deleted default website template', 'Website Blocking', template.name);
         } catch (error) {
           console.error('[LOCTIV AUDIT] Default website was deleted but could not be logged:', error);
           showToast('Default website deleted, but the audit log could not be saved.', true);
