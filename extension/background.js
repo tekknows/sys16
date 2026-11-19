@@ -38,7 +38,9 @@ function isScheduleActive(rule, now = new Date()) {
   const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toLowerCase();
   if (!days.includes(day)) return false;
   const date = `${scheduleDate.getFullYear()}-${String(scheduleDate.getMonth() + 1).padStart(2, '0')}-${String(scheduleDate.getDate()).padStart(2, '0')}`;
-  return (!rule.starts_on || date >= rule.starts_on) && (!rule.expires_on || date <= rule.expires_on);
+  const startsOn = rule.starts_on || rule.start_date;
+  const expiresOn = rule.expires_on || rule.end_date;
+  return (!startsOn || date >= startsOn) && (!expiresOn || date <= expiresOn);
 }
 
 function getZonedClock(date, timezone) {
@@ -67,7 +69,7 @@ function normalizeDomain(value) {
     .toLowerCase()
     .replace(/^https?:\/\//, '')
     .replace(/^www\./, '')
-    .replace(/\/.*$/, '');
+    .replace(/[/?#].*$/, '');
 }
 
 function logBlocking(message, details = {}) {
@@ -433,10 +435,16 @@ async function loadBlockingSchedules(session) {
         })
       : Promise.resolve([]);
     const [schedules, assignments] = await Promise.all([
-      request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,timezone')
-        .catch(() => request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on')),
+      request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,timezone,employee_schedule_id')
+        .catch(() => request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,employee_schedule_id')
+          .catch(() => request('blocking_schedules?is_active=eq.true&select=id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on'))),
       assignmentRequest,
     ]);
+    const linkedEmployeeScheduleIds = [...new Set(schedules.map((schedule) => schedule.employee_schedule_id).filter(Boolean))];
+    const employeeSchedules = linkedEmployeeScheduleIds.length
+      ? await request(`employee_schedules?id=in.(${linkedEmployeeScheduleIds.map(encodeURIComponent).join(',')})&employee_id=eq.${encodeURIComponent(employeeId)}&is_active=eq.true&select=id,start_date,end_date,working_days,start_time,end_time,timezone`)
+      : [];
+    const employeeSchedulesById = new Map(employeeSchedules.map((schedule) => [schedule.id, schedule]));
     logBlocking('Required policy tables retrieved', {
       employeeId,
       scheduleCount: schedules.length,
@@ -482,7 +490,21 @@ async function loadBlockingSchedules(session) {
           const isGlobal = !scope || scope === 'global' || scope === 'all';
           return isGlobal || (assignments !== null && assignedScheduleIds.has(schedule.id));
         })
-        .map((rule) => ({ ...schedule, ...rule, schedule_id: schedule.id }));
+        .map((rule) => {
+          const policy = { ...schedule, ...rule, schedule_id: schedule.id };
+          if (schedule.employee_schedule_id) {
+            const employeeSchedule = employeeSchedulesById.get(schedule.employee_schedule_id);
+            if (!employeeSchedule) return null;
+            policy.start_time = employeeSchedule.start_time;
+            policy.end_time = employeeSchedule.end_time;
+            policy.days_of_week = employeeSchedule.working_days;
+            policy.starts_on = employeeSchedule.start_date;
+            policy.expires_on = employeeSchedule.end_date;
+            policy.timezone = employeeSchedule.timezone || 'Asia/Manila';
+          }
+          return policy;
+        })
+        .filter(Boolean);
     });
     logBlocking('Retrieved policy records', {
       authenticatedUserId: session.user.id,

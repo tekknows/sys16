@@ -24,13 +24,12 @@ let directoryLaptops = [];
 let directoryAssignments = [];
 let blockingRules = [];
 let employeeSchedules = [];
+let defaultBlockingWebsites = [];
 let activityLogs = [];
 let notifications = [];
 let deviceRegistrations = [];
 let connectionHistory = [];
 let blockingScheduleSchemaReady = true;
-let blockingScheduleLinkReady = true;
-let blockingTargetSchemaReady = true;
 let ticketStatusCounts = {};
 let monitoringRefreshTimer = null;
 let monitoringRefreshTimeout = null;
@@ -51,7 +50,70 @@ function normalizeBlockingDays(value) {
 
 function normalizeBlockingDomain(value) {
   return String(value || '').trim().toLowerCase()
-    .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+    .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[/?#].*$/, '');
+}
+
+function getEmployeeSchedule(employeeId) {
+  if (!employeeId) return null;
+  const parts = getBlockingZonedClock(new Date(), PHILIPPINES_TIMEZONE);
+  const today = `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+  return employeeSchedules
+    .filter((schedule) => schedule.employee_id === employeeId
+      && schedule.is_active
+      && schedule.end_date >= today)
+    .sort((left, right) => {
+      const leftUpcoming = left.start_date > today;
+      const rightUpcoming = right.start_date > today;
+      if (leftUpcoming !== rightUpcoming) return leftUpcoming ? 1 : -1;
+      const dateOrder = leftUpcoming
+        ? left.start_date.localeCompare(right.start_date)
+        : right.start_date.localeCompare(left.start_date);
+      return dateOrder || String(right.created_at || '').localeCompare(String(left.created_at || ''));
+    })[0] || null;
+}
+
+function renderBlockingSchedulePreview(employeeId, elementId) {
+  const preview = document.getElementById(elementId);
+  if (!preview) return;
+  const schedule = getEmployeeSchedule(employeeId);
+  if (!schedule) {
+    preview.textContent = employeeId
+      ? 'No active employee schedule found. Please assign an employee schedule first.'
+      : 'Select an employee to view their active schedule.';
+    preview.classList.toggle('error-text', Boolean(employeeId));
+    return;
+  }
+  const days = normalizeBlockingDays(schedule.working_days).join(', ');
+  const lunch = schedule.lunch_enabled
+    ? ` · Lunch ${String(schedule.lunch_start).slice(0, 5)}–${String(schedule.lunch_end).slice(0, 5)}`
+    : '';
+  preview.textContent = `${schedule.start_date}–${schedule.end_date} · ${days} · ${String(schedule.start_time).slice(0, 5)}–${String(schedule.end_time).slice(0, 5)}${lunch}`;
+  preview.classList.remove('error-text');
+}
+
+function renderDefaultBlockingWebsites() {
+  const table = document.getElementById('defaultBlockingWebsiteTable');
+  if (table) {
+    table.innerHTML = defaultBlockingWebsites.length ? defaultBlockingWebsites.map((entry) => `
+      <tr>
+        <td>${escapeHtml(entry.domain)}</td>
+        <td><span class="status-pill ${entry.is_active ? 'success' : 'neutral'}">${entry.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td><div class="blocking-rule-actions">
+          <button class="text-btn edit-default-blocking" type="button" data-template-id="${escapeHtml(entry.id)}">Edit</button>
+          <button class="text-btn toggle-default-blocking" type="button" data-template-id="${escapeHtml(entry.id)}">${entry.is_active ? 'Deactivate' : 'Activate'}</button>
+          <button class="text-btn delete-default-blocking" type="button" data-template-id="${escapeHtml(entry.id)}">Delete</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="3">No default websites configured.</td></tr>';
+  }
+  const options = document.getElementById('bulkBlockingTemplateOptions');
+  if (options) {
+    const activeEntries = defaultBlockingWebsites.filter((entry) => entry.is_active);
+    options.innerHTML = activeEntries.length ? activeEntries.map((entry) => `
+      <label class="blocking-template-option">
+        <input type="checkbox" name="templateIds" value="${escapeHtml(entry.id)}" />
+        <span>${escapeHtml(entry.domain)}</span>
+      </label>`).join('') : '<p class="panel-subtitle">No active default websites are available.</p>';
+  }
 }
 
 function isBlockingScheduleActiveNow(row, now = new Date()) {
@@ -614,7 +676,8 @@ function renderBlockingTable() {
   const table = document.getElementById('blockingTable');
   if (!table) return;
   table.innerHTML = blockingRules.length ? blockingRules.map((row) => {
-    const days = normalizeBlockingDays(row.days_of_week).join(', ') || 'Every day';
+    const sourceSchedule = employeeSchedules.find((schedule) => schedule.id === row.employee_schedule_id);
+    const days = normalizeBlockingDays(sourceSchedule?.working_days || row.days_of_week).join(', ') || 'Every day';
     const targetEmployee = row.target_profile_id
       ? directoryEmployees.find((employee) => employee.profile_id === row.target_profile_id)
       : null;
@@ -624,9 +687,20 @@ function renderBlockingTable() {
         : 'Specific employee'
       : 'All employees';
     const now = new Date();
-    const start = String(row.start_time || '00:00').slice(0, 5);
-    const end = String(row.end_time || '23:59').slice(0, 5);
-    const status = !row.is_active ? 'Paused' : isBlockingScheduleActiveNow(row) ? 'Active' : 'Scheduled';
+    const start = String(sourceSchedule?.start_time || row.start_time || '00:00').slice(0, 5);
+    const end = String(sourceSchedule?.end_time || row.end_time || '23:59').slice(0, 5);
+    const statusRow = sourceSchedule ? {
+      ...row,
+      start_time: sourceSchedule.start_time,
+      end_time: sourceSchedule.end_time,
+      days_of_week: sourceSchedule.working_days,
+      starts_on: sourceSchedule.start_date,
+      expires_on: sourceSchedule.end_date,
+      timezone: sourceSchedule.timezone,
+    } : row;
+    const status = !row.is_active || (sourceSchedule && !sourceSchedule.is_active)
+      ? 'Paused'
+      : isBlockingScheduleActiveNow(statusRow) ? 'Active' : 'Scheduled';
     return `
         <tr>
           <td>${escapeHtml(row.domain)}</td>
@@ -816,17 +890,25 @@ async function loadBlockingPolicies(client) {
   };
 
   const [scheduleResult, ruleResult, assignmentResult, employeeResult] = await Promise.all([
-    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,timezone').order('created_at', { ascending: false }),
+    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,timezone,employee_schedule_id').order('created_at', { ascending: false }),
     client.from('website_blocking_rules').select('id,domain,target_profile_id,is_active,created_by').order('created_at', { ascending: false }),
     client.from('blocking_schedule_assignments').select('schedule_id,employee_id,laptop_id'),
     client.from('employees').select('id,profile_id'),
   ]);
-  if (scheduleResult.error && /timezone/i.test(scheduleResult.error.message)) {
+  if (scheduleResult.error && /timezone|employee_schedule_id/i.test(scheduleResult.error.message)) {
     const fallbackScheduleResult = await client.from('blocking_schedules')
-      .select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by')
+      .select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,employee_schedule_id')
       .order('created_at', { ascending: false });
-    scheduleResult.data = (fallbackScheduleResult.data || []).map((schedule) => ({ ...schedule, timezone: 'Asia/Manila' }));
-    scheduleResult.error = fallbackScheduleResult.error;
+    if (fallbackScheduleResult.error && /employee_schedule_id/i.test(fallbackScheduleResult.error.message)) {
+      const legacyScheduleResult = await client.from('blocking_schedules')
+        .select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by')
+        .order('created_at', { ascending: false });
+      scheduleResult.data = (legacyScheduleResult.data || []).map((schedule) => ({ ...schedule, timezone: 'Asia/Manila' }));
+      scheduleResult.error = legacyScheduleResult.error;
+    } else {
+      scheduleResult.data = (fallbackScheduleResult.data || []).map((schedule) => ({ ...schedule, timezone: 'Asia/Manila' }));
+      scheduleResult.error = fallbackScheduleResult.error;
+    }
   }
   if (scheduleResult.error || ruleResult.error || assignmentResult.error || employeeResult.error) {
     return legacyQuery();
@@ -834,7 +916,6 @@ async function loadBlockingPolicies(client) {
   let linkedRuleResult = await client.from('website_blocking_rules')
     .select('id,domain,schedule_id,target_profile_id,is_active,created_by')
     .order('created_at', { ascending: false });
-  const scheduleLinkReady = !linkedRuleResult.error;
   if (linkedRuleResult.error) {
     linkedRuleResult = { data: [], error: null };
   }
@@ -864,13 +945,14 @@ async function loadBlockingPolicies(client) {
       days_of_week: normalizeBlockingDays(schedule.days_of_week),
       starts_on: schedule.starts_on || null,
       expires_on: schedule.expires_on || null,
+      employee_schedule_id: schedule.employee_schedule_id || null,
       timezone: schedule.timezone || 'Asia/Manila',
       target_profile_id: rule.target_profile_id || employeeProfiles.get(assignment?.employee_id) || null,
       is_active: rule.is_active && schedule.is_active !== false,
       created_by: rule.created_by || schedule.created_by,
     }));
   });
-  return { canonical: true, scheduleLink: scheduleLinkReady, data };
+  return { canonical: true, data };
 }
 
 async function loadDashboardData() {
@@ -914,13 +996,18 @@ async function loadDashboardData() {
     deviceMonitoringSchemaReady = true;
     const policyResult = await loadBlockingPolicies(client);
     blockingScheduleSchemaReady = policyResult.canonical;
-    blockingScheduleLinkReady = policyResult.scheduleLink !== false;
-    blockingTargetSchemaReady = true;
     const scheduleResult = await client.from('employee_schedules')
       .select('id,employee_id,start_date,end_date,working_days,start_time,end_time,lunch_enabled,lunch_start,lunch_end,timezone,is_active,created_at')
       .order('created_at', { ascending: false });
     if (scheduleResult.error && !/employee_schedules/i.test(scheduleResult.error.message)) throw scheduleResult.error;
     employeeSchedules = scheduleResult.error ? [] : (scheduleResult.data || []);
+    const defaultWebsiteResult = await client.from('default_blocking_websites')
+      .select('id,domain,is_active,created_at')
+      .order('domain', { ascending: true });
+    if (defaultWebsiteResult.error) {
+      throw new Error(`Default website list could not be loaded. Run migration 026_schedule_based_website_blocking.sql. ${defaultWebsiteResult.error.message}`);
+    }
+    defaultBlockingWebsites = defaultWebsiteResult.data || [];
     await loadTicketCategories(client);
     const [employeeResult, profileResult, roleResult, , assignmentResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
@@ -944,31 +1031,25 @@ async function loadDashboardData() {
     if (targetEmployeeSelect) {
       const selectedProfileId = targetEmployeeSelect.value;
       const eligibleEmployees = directoryEmployees.filter((employee) => employee.active);
-      targetEmployeeSelect.innerHTML = '<option value="">All employees</option>' + eligibleEmployees.map((employee) => (
-        `<option value="${escapeHtml(employee.profile_id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
+      targetEmployeeSelect.innerHTML = '<option value="">Select an employee</option>' + eligibleEmployees.map((employee) => (
+        `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
       )).join('');
-      if (eligibleEmployees.some((employee) => employee.profile_id === selectedProfileId)) {
+      if (eligibleEmployees.some((employee) => employee.id === selectedProfileId)) {
         targetEmployeeSelect.value = selectedProfileId;
       }
-      targetEmployeeSelect.disabled = !blockingTargetSchemaReady;
-      document.getElementById('blockingTargetHelp').textContent = blockingTargetSchemaReady
-        ? 'Choose one employee or leave this set to All employees.'
-        : 'Run migration 006_blocking_rule_employee_targets.sql to enable specific employee targeting.';
+      targetEmployeeSelect.disabled = false;
     }
     const bulkTargetSelect = document.getElementById('bulkBlockingTargetEmployee');
     if (bulkTargetSelect) {
       const selectedProfileId = bulkTargetSelect.value;
       const eligibleEmployees = directoryEmployees.filter((employee) => employee.active);
-      bulkTargetSelect.innerHTML = '<option value="">All employees</option>' + eligibleEmployees.map((employee) => (
-        `<option value="${escapeHtml(employee.profile_id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
+      bulkTargetSelect.innerHTML = '<option value="">Select an employee</option>' + eligibleEmployees.map((employee) => (
+        `<option value="${escapeHtml(employee.id)}">${escapeHtml(employee.name)} (${escapeHtml(employee.user_id)})</option>`
       )).join('');
-      if (eligibleEmployees.some((employee) => employee.profile_id === selectedProfileId)) {
+      if (eligibleEmployees.some((employee) => employee.id === selectedProfileId)) {
         bulkTargetSelect.value = selectedProfileId;
       }
-      bulkTargetSelect.disabled = !blockingScheduleSchemaReady;
-      document.getElementById('bulkBlockingTargetHelp').textContent = blockingScheduleSchemaReady
-        ? 'Choose one employee or leave this set to All employees.'
-        : 'Run the database schedule migrations before creating bulk schedules.';
+      bulkTargetSelect.disabled = false;
     }
     directoryLaptops = laptopResult.data || [];
     const employeesById = new Map(directoryEmployees.map((employee) => [employee.id, employee]));
@@ -992,6 +1073,9 @@ async function loadDashboardData() {
     renderActivityList();
     renderNotifications();
     renderBlockingTable();
+    renderDefaultBlockingWebsites();
+    renderBlockingSchedulePreview(document.getElementById('blockingTargetEmployee')?.value, 'singleBlockingSchedulePreview');
+    renderBlockingSchedulePreview(document.getElementById('bulkBlockingTargetEmployee')?.value, 'bulkBlockingSchedulePreview');
     renderAssignmentTable();
     renderAssignmentOptions();
     renderEmployeeTable();
@@ -2519,100 +2603,67 @@ function setupDashboardInteractions() {
     const resetRuleForm = () => {
       scheduleForm.reset();
       scheduleForm.elements.namedItem('ruleId').value = '';
+      scheduleForm.elements.namedItem('employeeId').disabled = false;
       document.getElementById('cancelRuleEditBtn').classList.add('hidden');
+      document.getElementById('singleBlockingState').classList.add('hidden');
+      document.getElementById('singleBlockingState').classList.remove('error-text');
+      renderBlockingSchedulePreview('', 'singleBlockingSchedulePreview');
     };
+    document.getElementById('blockingTargetEmployee')?.addEventListener('change', (event) => {
+      renderBlockingSchedulePreview(event.currentTarget.value, 'singleBlockingSchedulePreview');
+    });
     document.getElementById('cancelRuleEditBtn')?.addEventListener('click', resetRuleForm);
     scheduleForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const formData = new FormData(scheduleForm);
-      const domain = String(formData.get('domain') || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
-      const days = formData.getAll('days');
+      const state = document.getElementById('singleBlockingState');
+      const domain = normalizeBlockingDomain(scheduleForm.elements.domain.value);
+      const employeeId = scheduleForm.elements.employeeId.value;
+      const employee = directoryEmployees.find((row) => row.id === employeeId && row.active);
+      const ruleId = scheduleForm.elements.ruleId.value;
       if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain)) {
         scheduleForm.elements.domain.setCustomValidity('Enter a valid website domain without a path.');
         scheduleForm.elements.domain.reportValidity();
         return;
       }
       scheduleForm.elements.domain.setCustomValidity('');
-      if (!days.length) {
-        setDashboardState('Select at least one day for this blocking schedule.', true);
+      const schedule = getEmployeeSchedule(employeeId);
+      if (!employee || !schedule) {
+        state.textContent = employeeId
+          ? 'No active employee schedule found. Please assign an employee schedule first.'
+          : 'Select an employee with an active schedule.';
+        state.classList.remove('hidden');
+        state.classList.add('error-text');
         return;
       }
-      const ruleId = String(formData.get('ruleId') || '');
-      const priorRule = blockingRules.find((rule) => rule.id === ruleId);
-      const targetProfileId = scheduleForm.elements.namedItem('targetProfileId').value;
-      if (targetProfileId && !blockingTargetSchemaReady) {
-        setDashboardState('Specific employee schedules require migration 006_blocking_rule_employee_targets.sql.', true);
-        return;
-      }
-      const ruleValues = {
-        domain,
-        is_active: priorRule?.is_active ?? true,
-        created_by: adminUser.id,
-      };
-      const scheduleValues = {
-        name: domain,
-        scope: targetProfileId ? 'Employee' : 'Global',
-        timezone: PHILIPPINES_TIMEZONE,
-        start_time: formData.get('startTime'),
-        end_time: formData.get('endTime'),
-        days_of_week: days,
-        starts_on: null,
-        expires_on: null,
-        is_active: priorRule?.is_active ?? true,
-        created_by: adminUser.id,
-      };
-      if (blockingTargetSchemaReady) ruleValues.target_profile_id = targetProfileId || null;
       const submit = scheduleForm.querySelector('button[type="submit"]');
       submit.disabled = true;
+      let saved = false;
+      state.classList.add('hidden');
       try {
-        if (blockingScheduleSchemaReady) {
-          let scheduleId = priorRule?.schedule_id;
-          if (scheduleId) {
-            let scheduleQuery = await getSupabaseClient().from('blocking_schedules').update(scheduleValues).eq('id', scheduleId);
-            if (scheduleQuery.error) throw scheduleQuery.error;
-          } else {
-            let scheduleQuery = await getSupabaseClient().from('blocking_schedules').insert(scheduleValues).select('id').single();
-            if (scheduleQuery.error) throw scheduleQuery.error;
-            scheduleId = scheduleQuery.data.id;
-          }
-          if (blockingScheduleLinkReady) ruleValues.schedule_id = scheduleId;
-          const ruleQuery = ruleId
-            ? await getSupabaseClient().from('website_blocking_rules').update(ruleValues).eq('id', ruleId)
-            : await getSupabaseClient().from('website_blocking_rules').insert(ruleValues);
-          if (ruleQuery.error) throw ruleQuery.error;
-          if (scheduleId) {
-            const clearAssignments = await getSupabaseClient().from('blocking_schedule_assignments').delete().eq('schedule_id', scheduleId);
-            if (clearAssignments.error) throw clearAssignments.error;
-            if (targetProfileId) {
-              const assignmentQuery = await getSupabaseClient().from('blocking_schedule_assignments').insert({
-                schedule_id: scheduleId,
-                employee_id: directoryEmployees.find((employee) => employee.profile_id === targetProfileId)?.id || null,
-                assigned_by: adminUser.id,
-              });
-              if (assignmentQuery.error) throw assignmentQuery.error;
-            }
-          }
-        } else {
-          const legacyValues = {
-            ...ruleValues,
-            start_time: scheduleValues.start_time,
-            end_time: scheduleValues.end_time,
-            days_of_week: scheduleValues.days_of_week,
-          };
-          const query = ruleId
-            ? await getSupabaseClient().from('website_blocking_rules').update(legacyValues).eq('id', ruleId)
-            : await getSupabaseClient().from('website_blocking_rules').insert(legacyValues);
-          if (query.error) throw query.error;
-        }
-        await writeChangeLog(ruleId ? 'Updated blocking schedule' : 'Created blocking schedule', 'Website blocking', ruleId || domain);
+        const { error } = await getSupabaseClient().rpc('save_employee_blocking_policy', {
+          p_employee_id: employee.id,
+          p_domain: domain,
+          p_existing_rule_id: ruleId || null,
+        });
+        if (error) throw error;
+        saved = true;
         resetRuleForm();
         await loadDashboardData();
-        const target = targetProfileId
-          ? directoryEmployees.find((employee) => employee.profile_id === targetProfileId)
-          : null;
-        setDashboardState(`Policy saved for ${domain} (${target ? target.name : 'all employees'}).`);
+        state.textContent = `Policy saved for ${domain} (${employee.name}).`;
+        state.classList.remove('hidden', 'error-text');
+        try {
+          await writeChangeLog(ruleId ? 'Updated blocking policy' : 'Created blocking policy', 'Website Blocking', `${domain} · ${employee.name}`);
+        } catch (error) {
+          console.error('[LOCTIV AUDIT] Website policy was saved but could not be logged:', error);
+          state.textContent += ' The policy was saved, but the audit log could not be saved.';
+          state.classList.add('error-text');
+        }
       } catch (error) {
-        setDashboardState(`Website policy could not be saved: ${error.message}`, true);
+        state.textContent = saved
+          ? `Website policy was saved, but the dashboard could not refresh: ${error.message}`
+          : `Website policy could not be saved: ${error.message}`;
+        state.classList.remove('hidden');
+        state.classList.add('error-text');
       } finally {
         submit.disabled = false;
       }
@@ -2623,68 +2674,179 @@ function setupDashboardInteractions() {
     const form = event.currentTarget;
     const state = document.getElementById('bulkScheduleState');
     const submit = form.querySelector('button[type="submit"]');
-    const domains = [...new Set(String(form.elements.domains.value)
-      .split(/[\s,;]+/)
-      .map((value) => value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
-      .filter(Boolean))];
-    const days = [...form.querySelectorAll('input[name="days"]:checked')].map((input) => input.value);
-    const domainPattern = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
-    const startTime = form.elements.startTime.value;
-    const endTime = form.elements.endTime.value;
-    const lunchStart = form.elements.lunchStart.value;
-    const lunchEnd = form.elements.lunchEnd.value;
+    const employeeId = form.elements.employeeId.value;
+    const employee = directoryEmployees.find((row) => row.id === employeeId && row.active);
+    const templateIds = [...form.querySelectorAll('input[name="templateIds"]:checked')].map((input) => input.value);
     state.classList.add('hidden');
-    if (!domains.length || domains.some((domain) => !domainPattern.test(domain))) {
-      state.textContent = 'Enter valid domain names only (for example, facebook.com and youtube.com).';
+    if (!employee || !getEmployeeSchedule(employeeId)) {
+      state.textContent = 'No active employee schedule found. Please assign an employee schedule first.';
       state.classList.remove('hidden');
       state.classList.add('error-text');
       return;
     }
-    if (!days.length) {
-      state.textContent = 'Select at least one day for this schedule.';
-      state.classList.remove('hidden');
-      state.classList.add('error-text');
-      return;
-    }
-    if (!(startTime < lunchStart && lunchStart < lunchEnd && lunchEnd < endTime)) {
-      state.textContent = 'Set the times in order: work start, lunch start, lunch end, then work end. Overnight work schedules are not supported for lunch breaks.';
+    if (!templateIds.length) {
+      state.textContent = 'Select at least one active default website.';
       state.classList.remove('hidden');
       state.classList.add('error-text');
       return;
     }
     submit.disabled = true;
+    let saved = false;
     try {
-      const { data, error } = await getSupabaseClient().rpc('create_bulk_blocking_schedules', {
-        p_domains: domains,
-        p_target_profile_id: form.elements.targetProfileId.value || null,
-        p_start_time: startTime,
-        p_end_time: endTime,
-        p_lunch_start: lunchStart,
-        p_lunch_end: lunchEnd,
-        p_days: days,
+      const { data, error } = await getSupabaseClient().rpc('assign_default_blocking_websites', {
+        p_employee_id: employee.id,
+        p_template_ids: templateIds,
       });
       if (error) throw error;
-      const target = directoryEmployees.find((employee) => employee.profile_id === form.elements.targetProfileId.value);
-      state.textContent = `Created ${Number(data) || domains.length} bulk schedules for ${target ? target.name : 'all employees'}. Websites are allowed during lunch and blocked before and after it.`;
-      state.classList.remove('hidden', 'error-text');
-      form.elements.domains.value = '';
+      saved = true;
+      form.querySelectorAll('input[name="templateIds"]').forEach((input) => { input.checked = false; });
       await loadDashboardData();
+      state.textContent = `Assigned ${Number(data)} website${Number(data) === 1 ? '' : 's'} to ${employee.name}.`;
+      state.classList.remove('hidden', 'error-text');
       try {
-        await writeChangeLog('Created bulk work-hours blocking schedule', 'Website Blocking', domains.join(', '));
+        await writeChangeLog('Assigned default blocking websites', 'Website Blocking', `${employee.name} · ${Number(data)} websites`);
       } catch (error) {
-        console.error('[LOCTIV AUDIT] Bulk blocking schedule was created but could not be logged:', error);
-        state.textContent += ' The schedule was created, but the audit log could not be saved.';
+        console.error('[LOCTIV AUDIT] Website policies were assigned but could not be logged:', error);
+        state.textContent += ' Policies were assigned, but the audit log could not be saved.';
         state.classList.add('error-text');
       }
     } catch (error) {
-      state.textContent = `Bulk schedule could not be saved: ${error.message}`;
+      state.textContent = saved
+        ? `Websites were assigned, but the dashboard could not refresh: ${error.message}`
+        : `Bulk website assignment could not be saved: ${error.message}`;
       state.classList.remove('hidden');
       state.classList.add('error-text');
     } finally {
       submit.disabled = false;
     }
   });
+  document.getElementById('bulkBlockingTargetEmployee')?.addEventListener('change', (event) => {
+    renderBlockingSchedulePreview(event.currentTarget.value, 'bulkBlockingSchedulePreview');
+  });
+  const defaultWebsiteForm = document.getElementById('defaultBlockingWebsiteForm');
+  if (defaultWebsiteForm) {
+    const resetDefaultWebsiteForm = () => {
+      defaultWebsiteForm.reset();
+      defaultWebsiteForm.elements.templateId.value = '';
+      defaultWebsiteForm.querySelector('button[type="submit"]').textContent = 'Add default website';
+      document.getElementById('cancelDefaultBlockingEditBtn').classList.add('hidden');
+    };
+    document.getElementById('cancelDefaultBlockingEditBtn')?.addEventListener('click', resetDefaultWebsiteForm);
+    defaultWebsiteForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const state = document.getElementById('defaultBlockingWebsiteState');
+      const domain = normalizeBlockingDomain(defaultWebsiteForm.elements.domain.value);
+      const templateId = defaultWebsiteForm.elements.templateId.value;
+      if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain)) {
+        defaultWebsiteForm.elements.domain.setCustomValidity('Enter a valid website domain without a path.');
+        defaultWebsiteForm.elements.domain.reportValidity();
+        return;
+      }
+      defaultWebsiteForm.elements.domain.setCustomValidity('');
+      const submit = defaultWebsiteForm.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      let saved = false;
+      state.classList.add('hidden');
+      try {
+        const query = templateId
+          ? await getSupabaseClient().from('default_blocking_websites').update({ domain, updated_at: new Date().toISOString() }).eq('id', templateId)
+          : await getSupabaseClient().from('default_blocking_websites').insert({ domain, created_by: adminUser.id });
+        if (query.error?.code === '23505') throw new Error('That domain is already in the default website list.');
+        if (query.error) throw query.error;
+        saved = true;
+        resetDefaultWebsiteForm();
+        await loadDashboardData();
+        state.textContent = `${domain} saved to the default website list.`;
+        state.classList.remove('hidden', 'error-text');
+        try {
+          await writeChangeLog(templateId ? 'Updated default blocking website' : 'Added default blocking website', 'Website Blocking', domain);
+        } catch (error) {
+          console.error('[LOCTIV AUDIT] Default website was saved but could not be logged:', error);
+          state.textContent += ' The website was saved, but the audit log could not be saved.';
+          state.classList.add('error-text');
+        }
+      } catch (error) {
+        state.textContent = saved
+          ? `Default website was saved, but the dashboard could not refresh: ${error.message}`
+          : `Default website could not be saved: ${error.message}`;
+        state.classList.remove('hidden');
+        state.classList.add('error-text');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
   document.addEventListener('click', (event) => {
+    const editTemplateButton = event.target instanceof Element ? event.target.closest('.edit-default-blocking') : null;
+    if (editTemplateButton) {
+      const template = defaultBlockingWebsites.find((row) => row.id === editTemplateButton.dataset.templateId);
+      if (!template) return;
+      const form = document.getElementById('defaultBlockingWebsiteForm');
+      form.elements.templateId.value = template.id;
+      form.elements.domain.value = template.domain;
+      form.querySelector('button[type="submit"]').textContent = 'Save default website';
+      document.getElementById('cancelDefaultBlockingEditBtn').classList.remove('hidden');
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      form.elements.domain.focus({ preventScroll: true });
+      return;
+    }
+    const toggleTemplateButton = event.target instanceof Element ? event.target.closest('.toggle-default-blocking') : null;
+    if (toggleTemplateButton) {
+      const template = defaultBlockingWebsites.find((row) => row.id === toggleTemplateButton.dataset.templateId);
+      if (!template) return;
+      (async () => {
+        let updated = false;
+        try {
+          const { error } = await getSupabaseClient().from('default_blocking_websites')
+            .update({ is_active: !template.is_active, updated_at: new Date().toISOString() }).eq('id', template.id);
+          if (error) throw error;
+          updated = true;
+          await loadDashboardData();
+        } catch (error) {
+          showToast(updated
+            ? `Default website status changed, but the dashboard could not refresh: ${error.message}`
+            : `Default website status could not be updated: ${error.message}`, true);
+          return;
+        }
+        try {
+          await writeChangeLog(`${template.is_active ? 'Deactivated' : 'Activated'} default blocking website`, 'Website Blocking', template.domain);
+        } catch (error) {
+          console.error('[LOCTIV AUDIT] Default website status changed but could not be logged:', error);
+          showToast('Default website status changed, but the audit log could not be saved.', true);
+          return;
+        }
+        showToast(`Default website ${template.is_active ? 'deactivated' : 'activated'}.`);
+      })();
+      return;
+    }
+    const deleteTemplateButton = event.target instanceof Element ? event.target.closest('.delete-default-blocking') : null;
+    if (deleteTemplateButton) {
+      const template = defaultBlockingWebsites.find((row) => row.id === deleteTemplateButton.dataset.templateId);
+      if (!template || !window.confirm(`Delete ${template.domain} from the default website list? Existing employee policies will remain unchanged.`)) return;
+      (async () => {
+        let deleted = false;
+        try {
+          const { error } = await getSupabaseClient().from('default_blocking_websites').delete().eq('id', template.id);
+          if (error) throw error;
+          deleted = true;
+          await loadDashboardData();
+        } catch (error) {
+          showToast(deleted
+            ? `Default website was deleted, but the dashboard could not refresh: ${error.message}`
+            : `Default website could not be deleted: ${error.message}`, true);
+          return;
+        }
+        try {
+          await writeChangeLog('Deleted default blocking website', 'Website Blocking', template.domain);
+        } catch (error) {
+          console.error('[LOCTIV AUDIT] Default website was deleted but could not be logged:', error);
+          showToast('Default website deleted, but the audit log could not be saved.', true);
+          return;
+        }
+        showToast('Default website deleted.');
+      })();
+      return;
+    }
     const deleteButton = event.target instanceof Element ? event.target.closest('.blocking-delete-btn') : null;
     if (deleteButton) {
       const rule = blockingRules.find((row) => row.id === deleteButton.dataset.ruleId);
@@ -2716,17 +2878,19 @@ function setupDashboardInteractions() {
       showToast('This blocking schedule could not be found. Refresh the dashboard and try again.', true);
       return;
     }
+    const targetEmployee = directoryEmployees.find((employee) => employee.profile_id === rule.target_profile_id);
+    if (!targetEmployee) {
+      showToast('This is a legacy all-employee policy. Create an individual employee policy instead of editing the shared policy.', true);
+      return;
+    }
     const form = document.getElementById('scheduleForm');
     setActiveSection('blocking');
     document.querySelector('[data-blocking-tab="single"]')?.click();
     form.elements.namedItem('ruleId').value = rule.id;
     form.elements.namedItem('domain').value = rule.domain;
-    form.elements.namedItem('targetProfileId').value = rule.target_profile_id || '';
-    form.elements.namedItem('startTime').value = String(rule.start_time || '00:00').slice(0, 5);
-    form.elements.namedItem('endTime').value = String(rule.end_time || '23:59').slice(0, 5);
-    form.querySelectorAll('input[name="days"]').forEach((input) => {
-      input.checked = (rule.days_of_week || []).includes(input.value);
-    });
+    form.elements.namedItem('employeeId').value = targetEmployee.id;
+    form.elements.namedItem('employeeId').disabled = true;
+    renderBlockingSchedulePreview(targetEmployee.id, 'singleBlockingSchedulePreview');
     document.getElementById('cancelRuleEditBtn').classList.remove('hidden');
     form.scrollIntoView({ behavior: 'smooth', block: 'center' });
     form.elements.namedItem('domain').focus({ preventScroll: true });

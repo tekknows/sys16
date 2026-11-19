@@ -208,14 +208,14 @@
         <section id="blocking" class="module-panel">
           <div class="blocking-tabs" role="tablist" aria-label="Blocking schedule type">
             <button type="button" class="blocking-tab active" role="tab" aria-selected="true" data-blocking-tab="single">Single website policy</button>
-            <button type="button" class="blocking-tab" role="tab" aria-selected="false" data-blocking-tab="bulk">Bulk work-hours schedule</button>
+            <button type="button" class="blocking-tab" role="tab" aria-selected="false" data-blocking-tab="bulk">Bulk website assignment</button>
           </div>
           <div class="panel-card blocking-policy-panel active" data-blocking-panel="single">
             <div class="card-header">
               <h3>Website blocking policy</h3>
               <span class="pill accent">Philippine time · Asia/Manila</span>
             </div>
-            <p class="panel-subtitle">Schedule start and end times use Philippine local time. The dashboard clock shows the current Asia/Manila time.</p>
+            <p class="panel-subtitle">Blocking hours and days come from the employee's active schedule.</p>
             <form id="scheduleForm" class="form-grid">
               <input name="ruleId" type="hidden" />
               <label>
@@ -223,73 +223,67 @@
                 <input name="domain" placeholder="example.com" required />
               </label>
               <label>
-                <span>Apply to</span>
-                <select name="targetProfileId" id="blockingTargetEmployee">
-                  <option value="">All employees</option>
+                <span>Employee</span>
+                <select name="employeeId" id="blockingTargetEmployee" required>
+                  <option value="">Select an employee</option>
                 </select>
-                <small class="panel-subtitle" id="blockingTargetHelp"></small>
               </label>
-              <label>
-                <span>Start time</span>
-                <input name="startTime" type="time" value="09:00" />
-              </label>
-              <label>
-                <span>End time</span>
-                <input name="endTime" type="time" value="17:30" />
-              </label>
-              <div class="span-2 days-field">
-                <span>Days of week</span>
-                <div class="days-row">
-                  <label><input type="checkbox" name="days" value="Mon" checked /> Mon</label>
-                  <label><input type="checkbox" name="days" value="Tue" checked /> Tue</label>
-                  <label><input type="checkbox" name="days" value="Wed" checked /> Wed</label>
-                  <label><input type="checkbox" name="days" value="Thu" checked /> Thu</label>
-                  <label><input type="checkbox" name="days" value="Fri" checked /> Fri</label>
-                  <label><input type="checkbox" name="days" value="Sat" /> Sat</label>
-                  <label><input type="checkbox" name="days" value="Sun" /> Sun</label>
-                </div>
+              <div class="span-2 blocking-schedule-preview" id="singleBlockingSchedulePreview" aria-live="polite">
+                Select an employee to view their active schedule.
               </div>
               <div class="span-2 actions-row">
                 <button type="submit" class="primary-btn">Save policy</button>
                 <button type="button" class="secondary-btn hidden" id="cancelRuleEditBtn">Cancel edit</button>
               </div>
+              <p class="span-2 form-state hidden" id="singleBlockingState" role="status"></p>
             </form>
           </div>
 
           <div class="panel-card blocking-policy-panel" data-blocking-panel="bulk">
             <div class="card-header">
-              <div><h3>Bulk work-hours blocking</h3><p class="panel-subtitle">Block a list of websites during work hours, allow access during lunch, then resume blocking.</p></div>
+              <div><h3>Bulk website assignment</h3><p class="panel-subtitle">Choose one employee and assign active websites from the reusable default list.</p></div>
             </div>
             <form id="bulkScheduleForm" class="form-grid">
-              <label class="span-2">
-                <span>Websites or domains (one per line or comma-separated)</span>
-                <textarea name="domains" rows="4" placeholder="facebook.com&#10;youtube.com" required></textarea>
-              </label>
               <label>
-                <span>Apply to</span>
-                <select name="targetProfileId" id="bulkBlockingTargetEmployee"><option value="">All employees</option></select>
-                <small class="panel-subtitle" id="bulkBlockingTargetHelp">Choose one employee or leave this set to All employees.</small>
+                <span>Employee</span>
+                <select name="employeeId" id="bulkBlockingTargetEmployee" required><option value="">Select an employee</option></select>
               </label>
-              <label><span>Work starts</span><input name="startTime" type="time" value="08:00" required /></label>
-              <label><span>Work ends</span><input name="endTime" type="time" value="17:00" required /></label>
-              <label><span>Lunch starts</span><input name="lunchStart" type="time" value="12:00" required /></label>
-              <label><span>Lunch ends</span><input name="lunchEnd" type="time" value="13:00" required /></label>
-              <div class="span-2 days-field">
-                <span>Days of week</span>
-                <div class="days-row">
-                  <label><input type="checkbox" name="days" value="Mon" checked /> Mon</label>
-                  <label><input type="checkbox" name="days" value="Tue" checked /> Tue</label>
-                  <label><input type="checkbox" name="days" value="Wed" checked /> Wed</label>
-                  <label><input type="checkbox" name="days" value="Thu" checked /> Thu</label>
-                  <label><input type="checkbox" name="days" value="Fri" checked /> Fri</label>
-                  <label><input type="checkbox" name="days" value="Sat" /> Sat</label>
-                  <label><input type="checkbox" name="days" value="Sun" /> Sun</label>
+              <div class="span-2 blocking-schedule-preview" id="bulkBlockingSchedulePreview" aria-live="polite">
+                Select an employee to view their active schedule.
+              </div>
+              <div class="span-2">
+                <span>Default websites</span>
+                <div class="blocking-template-options" id="bulkBlockingTemplateOptions">
+                  <p class="panel-subtitle">No default websites are available.</p>
                 </div>
               </div>
-              <p class="span-2 panel-subtitle">For example, 08:00–17:00 with lunch 12:00–13:00 creates blocks from 08:00–12:00 and 13:00–17:00. Lunch times use 24-hour format; 12:00 is noon. Other overlapping schedules may still block these websites during lunch.</p>
-              <div class="span-2 actions-row"><button type="submit" class="primary-btn">Create bulk schedule</button></div>
+              <div class="span-2 actions-row"><button type="submit" class="primary-btn">Assign selected websites</button></div>
               <p class="span-2 form-state hidden" id="bulkScheduleState" role="status"></p>
             </form>
+          </div>
+
+          <div class="panel-card">
+            <div class="card-header">
+              <div><h3>Default website list</h3><p class="panel-subtitle">Reusable templates only; adding a domain here does not assign or block it.</p></div>
+            </div>
+            <form id="defaultBlockingWebsiteForm" class="form-grid">
+              <input name="templateId" type="hidden" />
+              <label class="span-2">
+                <span>Website or domain</span>
+                <input name="domain" placeholder="facebook.com" required />
+              </label>
+              <div class="span-2 actions-row">
+                <button type="submit" class="primary-btn">Add default website</button>
+                <button type="button" class="secondary-btn hidden" id="cancelDefaultBlockingEditBtn">Cancel edit</button>
+              </div>
+              <p class="span-2 form-state hidden" id="defaultBlockingWebsiteState" role="status"></p>
+            </form>
+            <div class="table-wrap">
+              <table class="schedule-table">
+                <thead><tr><th>Website domain</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="defaultBlockingWebsiteTable"></tbody>
+              </table>
+            </div>
           </div>
 
           <div class="panel-card">
