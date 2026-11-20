@@ -54,37 +54,6 @@ body::-webkit-scrollbar {
   gap: 12px;
 }
 
-.usage-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.usage-summary-grid > div {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-alt);
-}
-
-.usage-summary-grid span {
-  color: var(--text-soft);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.usage-summary-grid strong {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 1rem;
-  text-overflow: ellipsis;
-}
-
 .popup-header {
   position: sticky;
   top: -12px;
@@ -124,14 +93,14 @@ body::-webkit-scrollbar {
 .device-status-badge.is-offline,
 .endpoint-status.is-offline {
   background: var(--surface-alt);
-  color: var(--warning);
+  color: var(--accent);
 }
 
 .create-ticket-btn {
   border: 0;
   border-radius: 12px;
   padding: 11px 16px;
-  background: #d98250;
+  background: var(--accent);
   color: #fff;
   font-weight: 700;
   cursor: pointer;
@@ -139,7 +108,14 @@ body::-webkit-scrollbar {
 
 .create-ticket-btn:hover,
 .create-ticket-btn:focus-visible {
-  background: #e29363;
+  background: #1d4ed8;
+}
+
+#clockWidget .primary-btn,
+#clockWidget .secondary-btn {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 12px;
 }
 
 .metric-grid {

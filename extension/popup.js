@@ -402,20 +402,32 @@ async function loadEmployeeUsageSummary() {
     const mostVisited = [...usageByDomain.entries()]
       .sort((a, b) => b[1].visits - a[1].visits || b[1].seconds - a[1].seconds)[0]?.[0];
     document.getElementById('todayVisitCount').textContent = String(totalVisits);
-    document.getElementById('usageVisitCount').textContent = String(totalVisits);
-    document.getElementById('todayUsage').textContent = logs.length ? formatUsageDuration(totalSeconds) : 'No data';
-    document.getElementById('usageDataMb').textContent = `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
-    document.getElementById('mostVisitedSite').textContent = mostVisited || '—';
-    state.textContent = logs.length ? 'Based on the last seven Philippine calendar days.' : 'No website usage has been recorded in the last seven days.';
-    state.classList.remove('error-text');
+    const usageVisitCount = document.getElementById('usageVisitCount');
+    const todayUsage = document.getElementById('todayUsage');
+    const usageDataMb = document.getElementById('usageDataMb');
+    const mostVisitedSite = document.getElementById('mostVisitedSite');
+    if (usageVisitCount) usageVisitCount.textContent = String(totalVisits);
+    if (todayUsage) todayUsage.textContent = logs.length ? formatUsageDuration(totalSeconds) : 'No data';
+    if (usageDataMb) usageDataMb.textContent = `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
+    if (mostVisitedSite) mostVisitedSite.textContent = mostVisited || '—';
+    if (state) {
+      state.textContent = logs.length ? 'Based on the last seven Philippine calendar days.' : 'No website usage has been recorded in the last seven days.';
+      state.classList.remove('error-text');
+    }
   } catch (error) {
     document.getElementById('todayVisitCount').textContent = 'Unavailable';
-    document.getElementById('usageVisitCount').textContent = 'Unavailable';
-    document.getElementById('todayUsage').textContent = 'Unavailable';
-    document.getElementById('usageDataMb').textContent = 'Unavailable';
-    document.getElementById('mostVisitedSite').textContent = '—';
-    state.textContent = `Could not load usage summary: ${error.message}`;
-    state.classList.add('error-text');
+    const usageVisitCount = document.getElementById('usageVisitCount');
+    const todayUsage = document.getElementById('todayUsage');
+    const usageDataMb = document.getElementById('usageDataMb');
+    const mostVisitedSite = document.getElementById('mostVisitedSite');
+    if (usageVisitCount) usageVisitCount.textContent = 'Unavailable';
+    if (todayUsage) todayUsage.textContent = 'Unavailable';
+    if (usageDataMb) usageDataMb.textContent = 'Unavailable';
+    if (mostVisitedSite) mostVisitedSite.textContent = '—';
+    if (state) {
+      state.textContent = `Could not load usage summary: ${error.message}`;
+      state.classList.add('error-text');
+    }
   }
 }
 
