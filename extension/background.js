@@ -19,6 +19,7 @@ let usageSaveQueue = Promise.resolve();
 let focusedWindowId = null;
 let heartbeatInProgress = false;
 let authorizedWorkSession = false;
+let serverWorkSessionActive = false;
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -87,7 +88,7 @@ function getTrackedDomain(url) {
 }
 
 async function flushWebsiteUsage() {
-  if (!await isAuthorizedWorkSession()) {
+  if (!await syncAuthoritativeWorkSession()) {
     await ensureUsageStateLoaded();
     activeUsage.clear();
     await saveUsageState();
@@ -214,6 +215,66 @@ async function isAuthorizedWorkSession() {
   }
   authorizedWorkSession = true;
   return true;
+}
+
+async function syncAuthoritativeWorkSession() {
+  const session = await getValidExtensionSession();
+  if (!session?.access_token || !session.user?.id) {
+    serverWorkSessionActive = false;
+    return false;
+  }
+
+  const config = globalThis.MINDLOCK_CONFIG;
+  const response = await fetch(
+    `${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/rpc/get_my_work_status`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: config.supabaseAnonKey,
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    },
+  );
+  if (!response.ok) throw new Error(`Could not verify the work session (${response.status}).`);
+
+  const status = await response.json();
+  const active = status.active_session;
+  if (!active?.id || !active.scheduled_end_at) {
+    serverWorkSessionActive = false;
+    await chrome.storage.local.remove(workSessionStorageKey);
+    authorizedWorkSession = false;
+    await chrome.alarms.clear(heartbeatAlarm);
+    await ensureUsageStateLoaded();
+    activeUsage.forEach((entry) => stopUsageEntry(entry));
+    activeUsage.clear();
+    await saveUsageState();
+    await syncBlockingRules().catch((error) => {
+      console.error('[LOCTIV BLOCKING] Could not deactivate policies after the work session ended:', error);
+    });
+    return false;
+  }
+
+  serverWorkSessionActive = true;
+  await chrome.storage.local.set({
+    [workSessionStorageKey]: {
+      session_id: active.id,
+      scheduled_end_at: active.scheduled_end_at,
+      clock_in_at: active.clock_in_at,
+      lunch_enabled: Boolean(status.schedule?.lunch_enabled),
+      lunch_start: status.schedule?.lunch_start || null,
+      lunch_end: status.schedule?.lunch_end || null,
+    },
+  });
+  const wasAuthorized = authorizedWorkSession;
+  const authorized = await isAuthorizedWorkSession();
+  if (authorized !== wasAuthorized) {
+    syncBlockingRules().catch((error) => {
+      console.error('[LOCTIV BLOCKING] Could not update policies after work-session authorization changed:', error);
+    });
+  }
+  return authorized;
 }
 
 function stopUsageEntry(entry, stoppedAt = Date.now()) {
@@ -352,9 +413,30 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'work-session-changed') return false;
-  isAuthorizedWorkSession()
+  if (message.active === false) {
+    serverWorkSessionActive = false;
+    authorizedWorkSession = false;
+    chrome.storage.local.remove(workSessionStorageKey)
+      .then(() => chrome.alarms.clear(heartbeatAlarm))
+      .then(() => ensureUsageStateLoaded())
+      .then(() => {
+        activeUsage.forEach((entry) => stopUsageEntry(entry));
+        activeUsage.clear();
+        return saveUsageState();
+      })
+      .then(() => syncBlockingRules())
+      .then(() => sendResponse({ ok: true, active: false }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+  syncAuthoritativeWorkSession()
     .then(async (active) => {
       if (!active) {
+        if (serverWorkSessionActive) {
+          await chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
+        } else {
+          await chrome.alarms.clear(heartbeatAlarm);
+        }
         await ensureUsageStateLoaded();
         activeUsage.forEach((entry) => stopUsageEntry(entry));
         activeUsage.clear();
@@ -743,9 +825,14 @@ async function sendExtensionHeartbeat() {
       await setHeartbeatStatus('offline', 'Sign in to LOCTIV to connect this device.');
       return;
     }
-    if (!await isAuthorizedWorkSession()) {
-      await chrome.alarms.clear(heartbeatAlarm);
-      await setHeartbeatStatus('offline', 'Off Duty. The work-session heartbeat is stopped.');
+    if (!await syncAuthoritativeWorkSession()) {
+      if (serverWorkSessionActive) {
+        await chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
+        await setHeartbeatStatus('offline', 'Lunch break. Analytics and work-session heartbeat are paused.');
+      } else {
+        await chrome.alarms.clear(heartbeatAlarm);
+        await setHeartbeatStatus('offline', 'Off Duty. The work-session heartbeat is stopped.');
+      }
       return;
     }
 

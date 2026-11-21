@@ -9,6 +9,7 @@ let ticketRealtimeTimer = null;
 let lastPolicySyncAt = null;
 let employeeTheme = 'light';
 const workSessionStorageKey = 'mindlock-work-session';
+let currentWorkSchedule = null;
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'extension-heartbeat-success' && assignedDevice && message.received_at) {
@@ -205,6 +206,7 @@ async function refreshClockStatus() {
   const state = document.getElementById('clockState');
   try {
     const status = await restRequest('rpc/get_my_work_status', { method: 'POST', body: {} });
+    currentWorkSchedule = status.schedule || null;
     document.getElementById('clockEmployee').textContent = employeeProfile.full_name || employeeRecord.user_id;
     document.getElementById('clockWorkStatus').textContent = status.work_status || 'Off Duty';
     document.getElementById('clockWorkStatus').classList.toggle('is-offline', status.work_status !== 'Working');
@@ -235,8 +237,11 @@ async function refreshClockStatus() {
     } else {
       await extensionStorageRemove(workSessionStorageKey);
     }
+    await chrome.runtime.sendMessage({ type: 'work-session-changed', active: Boolean(active) });
+    return status;
   } catch (error) {
     state.textContent = error.message;
+    return null;
   }
 }
 
@@ -244,9 +249,26 @@ async function clockIn() {
   const state = document.getElementById('clockState');
   state.textContent = 'Validating schedule…';
   try {
-    await restRequest('rpc/clock_in_employee', { method: 'POST', body: {} });
-    await refreshClockStatus();
-    await chrome.runtime.sendMessage({ type: 'work-session-changed', active: true });
+    const session = await restRequest('rpc/clock_in_employee', { method: 'POST', body: {} });
+    const status = await refreshClockStatus();
+    if (status === null) {
+      if (!session?.session_id || !session.scheduled_end_at || new Date(session.scheduled_end_at).getTime() <= Date.now()) {
+        throw new Error('Clock In was recorded, but the active session could not be synchronized. Reopen the extension while online.');
+      }
+      await extensionStorageSet({
+        [workSessionStorageKey]: {
+          session_id: session.session_id,
+          scheduled_end_at: session.scheduled_end_at,
+          clock_in_at: session.clock_in_at,
+          lunch_enabled: Boolean(session.lunch_enabled ?? currentWorkSchedule?.lunch_enabled),
+          lunch_start: session.lunch_start || currentWorkSchedule?.lunch_start || null,
+          lunch_end: session.lunch_end || currentWorkSchedule?.lunch_end || null,
+        },
+      });
+      await chrome.runtime.sendMessage({ type: 'work-session-changed', active: true });
+    } else if (!status.active_session) {
+      throw new Error('Clock In was recorded, but the server reports no active work session. Refresh your status before continuing.');
+    }
     await syncBlockingRulesInBackground();
     state.textContent = 'Clocked In. Analytics and authorized blocking are active.';
   } catch (error) {
@@ -258,11 +280,15 @@ async function clockOut() {
   const state = document.getElementById('clockState');
   state.textContent = 'Ending work session…';
   try {
-    await restRequest('rpc/clock_out_employee', { method: 'POST', body: {} });
-    await refreshClockStatus();
+    const result = await restRequest('rpc/clock_out_employee', { method: 'POST', body: {} });
+    await extensionStorageRemove(workSessionStorageKey);
     await chrome.runtime.sendMessage({ type: 'work-session-changed', active: false });
     await syncBlockingRulesInBackground();
-    state.textContent = 'Clocked Out. Analytics and scheduled blocking are stopped.';
+    const status = await refreshClockStatus();
+    state.textContent = result.status === 'Auto-ended'
+      ? 'Your schedule ended this work session automatically. Analytics and scheduled blocking are stopped.'
+      : 'Clocked Out. Analytics and scheduled blocking are stopped.';
+    if (status === null) state.textContent += ' Status refresh failed; the local session was still stopped.';
   } catch (error) {
     state.textContent = error.message;
   }
