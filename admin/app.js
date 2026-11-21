@@ -686,48 +686,142 @@ function renderTicketLegend() {
 function renderBlockingTable() {
   const table = document.getElementById('blockingTable');
   if (!table) return;
-  table.innerHTML = blockingRules.length ? blockingRules.map((row) => {
+  const groupedPolicies = new Map();
+  blockingRules.forEach((policy) => {
+    const key = policy.assignment_group_id
+      ? `group:${policy.assignment_group_id}`
+      : `policy:${policy.id}`;
+    if (!groupedPolicies.has(key)) groupedPolicies.set(key, []);
+    groupedPolicies.get(key).push(policy);
+  });
+  table.innerHTML = groupedPolicies.size ? [...groupedPolicies.values()].map((policies) => {
+    const row = policies[0];
     const sourceSchedule = employeeSchedules.find((schedule) => schedule.id === row.employee_schedule_id);
     const days = normalizeBlockingDays(sourceSchedule?.working_days || row.days_of_week).join(', ') || 'Every day';
     const targetEmployee = row.target_profile_id
       ? directoryEmployees.find((employee) => employee.profile_id === row.target_profile_id)
       : null;
-    const scope = row.target_profile_id
-      ? targetEmployee
-        ? `${targetEmployee.name} (${targetEmployee.user_id})`
-        : 'Specific employee'
-      : 'All employees';
-    const now = new Date();
+    const scope = targetEmployee
+      ? `<button class="blocking-scope-link" type="button" data-profile-id="${escapeHtml(targetEmployee.profile_id)}">${escapeHtml(targetEmployee.name)} (${escapeHtml(targetEmployee.user_id)})</button>`
+      : row.target_profile_id ? 'Specific employee' : 'All employees';
     const start = String(sourceSchedule?.start_time || row.start_time || '00:00').slice(0, 5);
     const end = String(sourceSchedule?.end_time || row.end_time || '23:59').slice(0, 5);
-    const statusRow = sourceSchedule ? {
-      ...row,
-      start_time: sourceSchedule.start_time,
-      end_time: sourceSchedule.end_time,
-      days_of_week: sourceSchedule.working_days,
-      starts_on: sourceSchedule.start_date,
-      expires_on: sourceSchedule.end_date,
-      timezone: sourceSchedule.timezone,
-    } : row;
-    const status = !row.is_active || (sourceSchedule && !sourceSchedule.is_active)
-      ? 'Paused'
-      : isBlockingScheduleActiveNow(statusRow) ? 'Active' : 'Scheduled';
+    const statusForPolicy = (policy) => {
+      const policySchedule = employeeSchedules.find((schedule) => schedule.id === policy.employee_schedule_id);
+      if (!policy.is_active || (policySchedule && !policySchedule.is_active)) return 'Paused';
+      return isBlockingScheduleActiveNow(policySchedule ? {
+        ...policy,
+        start_time: policySchedule.start_time,
+        end_time: policySchedule.end_time,
+        days_of_week: policySchedule.working_days,
+        starts_on: policySchedule.start_date,
+        expires_on: policySchedule.end_date,
+        timezone: policySchedule.timezone,
+      } : policy) ? 'Active' : 'Scheduled';
+    };
+    const statuses = policies.map(statusForPolicy);
+    const status = statuses.every((value) => value === 'Active')
+      ? 'Active'
+      : statuses.every((value) => value === 'Paused')
+        ? 'Paused'
+        : statuses.every((value) => value === 'Scheduled')
+          ? 'Scheduled'
+          : 'Partial';
+    const groupName = row.assignment_group_name;
+    const scheduleLabel = groupName
+      ? `${escapeHtml(groupName)}<small class="blocking-group-count">${policies.length} website${policies.length === 1 ? '' : 's'}</small>`
+      : escapeHtml(row.domain);
+    const actions = groupName && targetEmployee
+      ? `<button class="text-btn blocking-manage-employee" type="button" data-profile-id="${escapeHtml(targetEmployee.profile_id)}">Manage websites</button>`
+      : `<div class="blocking-rule-actions">
+          <button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button>
+          <button class="text-btn blocking-delete-btn" type="button" data-rule-id="${escapeHtml(row.id)}">Delete</button>
+        </div>`;
     return `
         <tr>
-          <td>${escapeHtml(row.domain)}</td>
-          <td>${escapeHtml(scope)}</td>
+          <td>${scheduleLabel}</td>
+          <td>${scope}</td>
           <td>${escapeHtml(start)} - ${escapeHtml(end)}</td>
           <td>${escapeHtml(days)}</td>
           <td><span class="status-pill ${status === 'Active' ? 'success' : status === 'Scheduled' ? 'warning' : 'neutral'}">${status}</span></td>
-          <td>
-            <div class="blocking-rule-actions">
-              <button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(row.id)}">Edit</button>
-              <button class="text-btn blocking-delete-btn" type="button" data-rule-id="${escapeHtml(row.id)}">Delete</button>
-            </div>
-          </td>
+          <td>${actions}</td>
         </tr>
       `;
   }).join('') : '<tr><td colspan="6">No website blocking policies configured.</td></tr>';
+}
+
+function renderEmployeeBlockingPolicies(profileId) {
+  const employee = directoryEmployees.find((row) => row.profile_id === profileId);
+  const modal = document.getElementById('blockingEmployeePoliciesModal');
+  const body = document.getElementById('blockingEmployeePoliciesTable');
+  if (!employee || !modal || !body) return;
+  document.getElementById('blockingEmployeePoliciesTitle').textContent = `${employee.name} · blocked websites`;
+  const policies = blockingRules
+    .filter((policy) => policy.target_profile_id === profileId)
+    .sort((left, right) => left.domain.localeCompare(right.domain));
+  body.innerHTML = policies.length ? policies.map((policy) => {
+    const schedule = employeeSchedules.find((item) => item.id === policy.employee_schedule_id);
+    const scheduleText = schedule
+      ? `${String(schedule.start_time).slice(0, 5)}–${String(schedule.end_time).slice(0, 5)} · ${normalizeBlockingDays(schedule.working_days).join(', ')}`
+      : `${String(policy.start_time || '00:00').slice(0, 5)}–${String(policy.end_time || '23:59').slice(0, 5)}`;
+    const status = !policy.is_active || (schedule && !schedule.is_active)
+      ? 'Paused'
+      : isBlockingScheduleActiveNow(schedule ? {
+        ...policy,
+        start_time: schedule.start_time,
+        end_time: schedule.end_time,
+        days_of_week: schedule.working_days,
+        starts_on: schedule.start_date,
+        expires_on: schedule.end_date,
+        timezone: schedule.timezone,
+      } : policy) ? 'Active' : 'Scheduled';
+    return `<tr>
+      <td><strong>${escapeHtml(policy.domain)}</strong>${policy.assignment_group_name ? `<small class="blocking-policy-group">${escapeHtml(policy.assignment_group_name)}</small>` : ''}</td>
+      <td>${escapeHtml(scheduleText)}</td>
+      <td><span class="status-pill ${status === 'Active' ? 'success' : status === 'Scheduled' ? 'warning' : 'neutral'}">${status}</span></td>
+      <td><div class="blocking-rule-actions">
+        <button class="text-btn edit-blocking-rule" type="button" data-rule-id="${escapeHtml(policy.id)}">Edit</button>
+        <button class="text-btn blocking-delete-btn" type="button" data-rule-id="${escapeHtml(policy.id)}">Delete</button>
+      </div></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="4">No individual website policies are assigned to this employee.</td></tr>';
+  document.getElementById('blockingEmployeePoliciesState').classList.add('hidden');
+  modal.classList.remove('hidden');
+}
+
+function startBlockingRuleEdit(rule) {
+  const targetEmployee = directoryEmployees.find((employee) => employee.profile_id === rule.target_profile_id);
+  if (!targetEmployee) {
+    showToast('This is a legacy all-employee policy. Create an individual employee policy instead of editing the shared policy.', true);
+    return;
+  }
+  document.getElementById('blockingEmployeePoliciesModal')?.classList.add('hidden');
+  const form = document.getElementById('scheduleForm');
+  setActiveSection('blocking');
+  document.querySelector('[data-blocking-tab="single"]')?.click();
+  form.elements.namedItem('ruleId').value = rule.id;
+  form.elements.namedItem('domain').value = rule.domain;
+  form.elements.namedItem('employeeId').value = targetEmployee.id;
+  form.elements.namedItem('employeeId').disabled = true;
+  renderBlockingSchedulePreview(targetEmployee.id, 'singleBlockingSchedulePreview');
+  document.getElementById('cancelRuleEditBtn').classList.remove('hidden');
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  form.elements.namedItem('domain').focus({ preventScroll: true });
+  showToast(`Editing ${rule.domain}.`);
+}
+
+async function deleteBlockingRule(rule) {
+  const { error } = await getSupabaseClient().rpc('delete_website_blocking_policy', {
+    p_rule_id: rule.id,
+  });
+  if (error) throw error;
+  await loadDashboardData();
+  try {
+    await writeChangeLog('Deleted website blocking policy', 'Website Blocking', rule.domain);
+  } catch (error) {
+    console.error('[LOCTIV AUDIT] Website policy was deleted but could not be logged:', error);
+    showToast('Website policy deleted, but the activity log could not be saved.', true);
+  }
 }
 
 function renderAssignmentTable() {
@@ -901,11 +995,26 @@ async function loadBlockingPolicies(client) {
   };
 
   const [scheduleResult, ruleResult, assignmentResult, employeeResult] = await Promise.all([
-    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,timezone,employee_schedule_id').order('created_at', { ascending: false }),
+    client.from('blocking_schedules').select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,timezone,employee_schedule_id,assignment_group_id,assignment_group_name').order('created_at', { ascending: false }),
     client.from('website_blocking_rules').select('id,domain,target_profile_id,is_active,created_by').order('created_at', { ascending: false }),
     client.from('blocking_schedule_assignments').select('schedule_id,employee_id,laptop_id'),
     client.from('employees').select('id,profile_id'),
   ]);
+  if (scheduleResult.error && /assignment_group_id|assignment_group_name/i.test(scheduleResult.error.message)) {
+    const fallbackScheduleResult = await client.from('blocking_schedules')
+      .select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,timezone,employee_schedule_id')
+      .order('created_at', { ascending: false });
+    if (!fallbackScheduleResult.error) {
+      scheduleResult.data = (fallbackScheduleResult.data || []).map((schedule) => ({
+        ...schedule,
+        assignment_group_id: null,
+        assignment_group_name: null,
+      }));
+      scheduleResult.error = null;
+    } else {
+      scheduleResult.error = fallbackScheduleResult.error;
+    }
+  }
   if (scheduleResult.error && /timezone|employee_schedule_id/i.test(scheduleResult.error.message)) {
     const fallbackScheduleResult = await client.from('blocking_schedules')
       .select('id,name,scope,start_time,end_time,days_of_week,starts_on,expires_on,is_active,created_by,employee_schedule_id')
@@ -957,6 +1066,8 @@ async function loadBlockingPolicies(client) {
       starts_on: schedule.starts_on || null,
       expires_on: schedule.expires_on || null,
       employee_schedule_id: schedule.employee_schedule_id || null,
+      assignment_group_id: schedule.assignment_group_id || null,
+      assignment_group_name: schedule.assignment_group_name || null,
       timezone: schedule.timezone || 'Asia/Manila',
       target_profile_id: rule.target_profile_id || employeeProfiles.get(assignment?.employee_id) || null,
       is_active: rule.is_active && schedule.is_active !== false,
@@ -2828,6 +2939,11 @@ function setupDashboardInteractions() {
     });
   }
   document.addEventListener('click', (event) => {
+    const scopeButton = event.target instanceof Element ? event.target.closest('.blocking-scope-link, .blocking-manage-employee') : null;
+    if (scopeButton) {
+      renderEmployeeBlockingPolicies(scopeButton.dataset.profileId);
+      return;
+    }
     const editTemplateButton = event.target instanceof Element ? event.target.closest('.edit-default-blocking') : null;
     if (editTemplateButton) {
       const template = defaultBlockingTemplates.find((row) => row.id === editTemplateButton.dataset.templateId);
@@ -2906,17 +3022,10 @@ function setupDashboardInteractions() {
       if (!rule || !window.confirm(`Delete the ${rule.domain} blocking policy?`)) return;
       (async () => {
         try {
-          const client = getSupabaseClient();
-          const assignmentDelete = await client.from('blocking_schedule_assignments').delete().eq('schedule_id', rule.schedule_id);
-          if (assignmentDelete.error && !/relation|column/i.test(assignmentDelete.error.message)) throw assignmentDelete.error;
-          if (rule.schedule_id) {
-            const scheduleDelete = await client.from('blocking_schedules').delete().eq('id', rule.schedule_id);
-            if (scheduleDelete.error) throw scheduleDelete.error;
+          await deleteBlockingRule(rule);
+          if (!document.getElementById('blockingEmployeePoliciesModal').classList.contains('hidden')) {
+            renderEmployeeBlockingPolicies(rule.target_profile_id);
           }
-          const ruleDelete = await client.from('website_blocking_rules').delete().eq('id', rule.id);
-          if (ruleDelete.error) throw ruleDelete.error;
-          await writeChangeLog('Deleted blocking schedule', 'Website blocking', rule.domain);
-          await loadDashboardData();
           showToast(`${rule.domain} blocking policy deleted.`);
         } catch (error) {
           showToast(`Blocking policy deletion failed: ${error.message}`, true);
@@ -2931,23 +3040,7 @@ function setupDashboardInteractions() {
       showToast('This blocking schedule could not be found. Refresh the dashboard and try again.', true);
       return;
     }
-    const targetEmployee = directoryEmployees.find((employee) => employee.profile_id === rule.target_profile_id);
-    if (!targetEmployee) {
-      showToast('This is a legacy all-employee policy. Create an individual employee policy instead of editing the shared policy.', true);
-      return;
-    }
-    const form = document.getElementById('scheduleForm');
-    setActiveSection('blocking');
-    document.querySelector('[data-blocking-tab="single"]')?.click();
-    form.elements.namedItem('ruleId').value = rule.id;
-    form.elements.namedItem('domain').value = rule.domain;
-    form.elements.namedItem('employeeId').value = targetEmployee.id;
-    form.elements.namedItem('employeeId').disabled = true;
-    renderBlockingSchedulePreview(targetEmployee.id, 'singleBlockingSchedulePreview');
-    document.getElementById('cancelRuleEditBtn').classList.remove('hidden');
-    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    form.elements.namedItem('domain').focus({ preventScroll: true });
-    showToast(`Editing ${rule.domain}.`);
+    startBlockingRuleEdit(rule);
   });
 
   const assignmentForm = document.getElementById('assignmentForm');

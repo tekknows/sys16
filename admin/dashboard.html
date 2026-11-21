@@ -297,10 +297,11 @@
             <div class="card-header">
               <h3>Active schedules</h3>
             </div>
+            <div class="table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th>Schedule</th>
+                  <th>Schedule / template</th>
                   <th>Scope</th>
                   <th>Time</th>
                   <th>Days</th>
@@ -310,6 +311,7 @@
               </thead>
               <tbody id="blockingTable"></tbody>
             </table>
+            </div>
           </div>
         </section>
 
@@ -723,6 +725,22 @@
       <section class="modal-card">
         <div class="card-header"><h2 id="userDetailsTitle">Employee and assigned laptop</h2><button class="icon-btn" data-close-modal aria-label="Close details">×</button></div>
         <dl class="details-grid" id="userDetailsContent"></dl>
+      </section>
+    </div>
+
+    <div class="modal-backdrop hidden" id="blockingEmployeePoliciesModal" role="dialog" aria-modal="true" aria-labelledby="blockingEmployeePoliciesTitle">
+      <section class="modal-card blocking-employee-policies-modal">
+        <div class="card-header">
+          <div><p class="eyebrow">Website blocking</p><h2 id="blockingEmployeePoliciesTitle">Employee policies</h2></div>
+          <button class="icon-btn" data-close-modal aria-label="Close employee policies">×</button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Website</th><th>Schedule</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="blockingEmployeePoliciesTable"></tbody>
+          </table>
+        </div>
+        <p id="blockingEmployeePoliciesState" class="form-state hidden" role="status"></p>
       </section>
     </div>
 

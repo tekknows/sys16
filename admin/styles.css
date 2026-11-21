@@ -801,6 +801,38 @@ textarea,
   gap: 12px;
 }
 
+.blocking-scope-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.blocking-scope-link:hover {
+  color: var(--text);
+}
+
+.blocking-group-count,
+.blocking-policy-group {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.blocking-employee-policies-modal {
+  width: min(860px, 100%);
+}
+
+.blocking-employee-policies-modal .table-scroll {
+  max-height: 55vh;
+}
+
 .card-header {
   display: flex;
   align-items: center;
