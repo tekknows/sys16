@@ -554,12 +554,11 @@ function renderAnalyticsWebsiteTable(records) {
     const employeeId = row.employee_id || row.profile_id || '';
     const employee = employees.get(employeeId);
     if (!employee) return;
-    const key = `${employeeId}\u0000${row.domain}`;
+    const key = employeeId;
     const total = totals.get(key) || {
       employeeId,
       employeeName: employee.name || 'Unknown employee',
       employeeUserId: employee.user_id,
-      domain: row.domain,
       seconds: 0,
       bytes: 0,
       visits: 0,
@@ -573,12 +572,11 @@ function renderAnalyticsWebsiteTable(records) {
     .sort((a, b) => b.seconds - a.seconds || b.bytes - a.bytes)
     .map((row) => `<tr>
       <td><button type="button" class="analytics-employee-link" data-analytics-employee-id="${escapeHtml(row.employeeId)}" aria-label="View analytics for ${escapeHtml(row.employeeName)}">${escapeHtml(row.employeeUserId)}<small>${escapeHtml(row.employeeName)}</small></button></td>
-      <td>${escapeHtml(row.domain || 'Unknown website')}</td>
       <td>${formatUsageDuration(row.seconds)}</td>
       <td>${(row.bytes / (1024 * 1024)).toFixed(2)} MB</td>
       <td>${row.visits}</td>
     </tr>`)
-    .join('') || '<tr><td colspan="5">No usage records for connected employees with registered laptops in this selection.</td></tr>';
+    .join('') || '<tr><td colspan="4">No usage records for connected employees with registered laptops in this selection.</td></tr>';
 }
 
 function getConnectedRegisteredEmployees() {
@@ -801,18 +799,15 @@ function startBlockingRuleEdit(rule) {
     return;
   }
   document.getElementById('blockingEmployeePoliciesModal')?.classList.add('hidden');
-  const form = document.getElementById('scheduleForm');
   setActiveSection('blocking');
-  document.querySelector('[data-blocking-tab="single"]')?.click();
-  form.elements.namedItem('ruleId').value = rule.id;
-  form.elements.namedItem('domain').value = rule.domain;
-  form.elements.namedItem('employeeId').value = targetEmployee.id;
-  form.elements.namedItem('employeeId').disabled = true;
-  renderBlockingSchedulePreview(targetEmployee.id, 'singleBlockingSchedulePreview');
-  document.getElementById('cancelRuleEditBtn').classList.remove('hidden');
-  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  form.elements.namedItem('domain').focus({ preventScroll: true });
-  showToast(`Editing ${rule.domain}.`);
+  document.querySelector('[data-blocking-tab="bulk"]')?.click();
+  const employeeSelect = document.getElementById('bulkBlockingTargetEmployee');
+  if (employeeSelect) {
+    employeeSelect.value = targetEmployee.id;
+    employeeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  document.getElementById('bulkScheduleForm')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  showToast(`Selected ${targetEmployee.name}. Use Website Assignment to manage ${rule.domain}.`);
 }
 
 async function deleteBlockingRule(rule) {
@@ -914,7 +909,8 @@ function renderLaptopTable() {
   const query = (document.getElementById('laptopSearch')?.value || '').trim().toLowerCase();
   const status = document.getElementById('laptopStatusFilter')?.value || '';
   table.innerHTML = directoryLaptops
-    .filter((row) => (!status || row.status === status) && (!query || `${row.laptop_id} ${row.device_name} ${row.manufacturer} ${row.model} ${row.serial_number} ${row.mac_address}`.toLowerCase().includes(query)))
+    .filter((row) => ((!status && row.status !== 'Retired') || (status && row.status === status))
+      && (!query || `${row.laptop_id} ${row.device_name} ${row.manufacturer} ${row.model} ${row.serial_number} ${row.mac_address}`.toLowerCase().includes(query)))
     .map((row) => {
       const assignment = getActiveLaptopAssignment(row.id);
       const registration = getActiveDeviceRegistration(row);
@@ -933,6 +929,7 @@ function renderLaptopTable() {
           <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
           ${registration ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>` : ''}
           <button type="button" class="text-btn connection-history-laptop" data-laptop-id="${escapeHtml(row.id)}">History</button>
+          <button type="button" class="text-btn blocking-delete-btn delete-laptop" data-laptop-id="${escapeHtml(row.id)}">Delete</button>
         </td>
       </tr>`;
     }).join('') || '<tr><td colspan="10">No laptops registered.</td></tr>';
@@ -1368,7 +1365,6 @@ function renderTicketTable() {
       <td>${escapeHtml(ticket.profile?.full_name || ticket.employee?.user_id || 'Unknown employee')}</td>
       <td>${escapeHtml(ticket.subject)}</td>
       <td>${escapeHtml(ticket.issue_category)}</td>
-      <td><span class="status-pill ${ticket.priority === 'High' || ticket.priority === 'Urgent' ? 'warning' : 'neutral'}">${escapeHtml(ticket.priority || 'Normal')}</span></td>
       <td>${escapeHtml(ticket.assigned_staff?.full_name || 'Unassigned')}</td>
       <td><span class="status-pill ${ticket.status === 'Open' ? 'warning' : ticket.status === 'Resolved' ? 'success' : 'neutral'}">${escapeHtml(ticket.status)}</span></td>
       <td>${escapeHtml(formatDate(ticket.created_at))}</td>
@@ -2377,6 +2373,27 @@ function setupDashboardInteractions() {
       document.getElementById('connectionHistoryModal').classList.remove('hidden');
       return;
     }
+    if (button.classList.contains('delete-laptop')) {
+      if (!window.confirm(`Delete ${laptop.laptop_id}? Historical attendance and analytics will be preserved. Active work sessions cannot be deleted.`)) return;
+      button.disabled = true;
+      try {
+        const { error } = await getSupabaseClient().rpc('delete_laptop_record', { p_laptop_id: laptop.id });
+        if (error) throw error;
+        await loadDashboardData();
+        try {
+          await writeChangeLog('Deleted laptop record', 'Laptops', laptop.laptop_id);
+        } catch (logError) {
+          showToast(`Laptop ${laptop.laptop_id} was removed, but the activity log failed: ${logError.message}`, true);
+          return;
+        }
+        showToast(`Laptop ${laptop.laptop_id} was removed safely.`);
+      } catch (error) {
+        showToast(`Laptop could not be deleted: ${error.message}`, true);
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
     if (button.classList.contains('revoke-device')) {
       if (!window.confirm(`Revoke device registration for ${laptop.laptop_id}? Existing registration history will be retained.`)) return;
       button.disabled = true;
@@ -2863,7 +2880,7 @@ function setupDashboardInteractions() {
     } catch (error) {
       state.textContent = saved
         ? `Websites were assigned, but the dashboard could not refresh: ${error.message}`
-        : `Bulk website assignment could not be saved: ${error.message}`;
+        : `Website assignment could not be saved: ${error.message}`;
       state.classList.remove('hidden');
       state.classList.add('error-text');
     } finally {
