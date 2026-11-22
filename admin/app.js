@@ -457,6 +457,10 @@ function renderSettingsForms() {
     retention.elements.assignmentRetentionDays.value = settingValue('assignment_retention_days', 30);
     retention.elements.analyticsRetentionDays.value = settingValue('analytics_retention_days', 90);
   }
+  const overtime = document.getElementById('overtimeSettingsForm');
+  if (overtime) {
+    overtime.elements.maximumOvertimeHours.value = String(settingValue('maximum_overtime_hours', 2));
+  }
   const incognito = document.getElementById('incognitoSettingsForm');
   if (incognito) incognito.querySelector('#incognitoToggle').checked = settingValue('global_incognito_policy', false);
 }
@@ -628,12 +632,13 @@ function renderAnalyticsEmployeeDetail(employeeId) {
     .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at))
     .map((record) => `<tr>
       <td>${escapeHtml(record.domain || 'Unknown website')}</td>
+      <td>${escapeHtml(record.browser_mode || 'Normal')}</td>
       <td>${escapeHtml(formatDate(record.recorded_at))}</td>
       <td>${formatUsageDuration(Number(record.total_seconds) || 0)}</td>
       <td>${((Number(record.bytes_used) || 0) / (1024 * 1024)).toFixed(2)} MB</td>
       <td>${Number(record.visit_count) || 0}</td>
     </tr>`)
-    .join('') || '<tr><td colspan="5">No website records for the last seven days.</td></tr>';
+    .join('') || '<tr><td colspan="6">No website records for the last seven days.</td></tr>';
   panel.classList.remove('hidden');
   panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -879,6 +884,7 @@ function renderEmployeeTable() {
         <td><button type="button" class="text-btn view-employee-details" data-employee-id="${escapeHtml(row.id)}">${escapeHtml(row.name)}</button></td>
         <td>${escapeHtml(row.department || '—')}</td>
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
+        <td>${statusPill(row.work_status || 'Clocked Out')}</td>
         <td>${escapeHtml(row.email)}</td>
         <td>${statusPill(row.active ? (row.account_status || 'Active') : 'Suspended')}</td>
         <td>
@@ -891,7 +897,7 @@ function renderEmployeeTable() {
           </div>
         </td>
       </tr>`;
-    }).join('') || '<tr><td colspan="8">No employees found.</td></tr>';
+    }).join('') || '<tr><td colspan="9">No employees found.</td></tr>';
 }
 
 function renderUserRoleAssignments() {
@@ -1087,7 +1093,7 @@ async function loadDashboardData() {
     const { error: assignmentCloseError } = await client.rpc('close_expired_laptop_assignments');
     if (assignmentCloseError && !/close_expired_laptop_assignments/i.test(assignmentCloseError.message)) throw assignmentCloseError;
     const results = await Promise.all([
-      client.from('employees').select('id,profile_id,user_id,department,position,active').order('created_at', { ascending: false }),
+      client.from('employees').select('id,profile_id,user_id,department,position,active,work_status').order('created_at', { ascending: false }),
       client.from('profiles').select('id,full_name,email,department,position,account_status'),
       client.from('user_roles').select('profile_id,role_name').is('revoked_at', null),
       client.from('laptops').select('id,laptop_id,device_registration_id,device_name,manufacturer,model,serial_number,mac_address,operating_system,browser,extension_version,status,last_sync_at,last_seen_at,connectivity_status,work_session_id').order('created_at', { ascending: false }),
@@ -1879,7 +1885,7 @@ async function loadAnalyticsData() {
     const records = [];
     for (let offset = 0; ; offset += 1000) {
       const { data, error } = await client.from('website_usage_logs')
-        .select('id,employee_id,profile_id,domain,visit_count,total_seconds,bytes_used,recorded_at')
+        .select('id,employee_id,profile_id,domain,browser_mode,visit_count,total_seconds,bytes_used,recorded_at')
         .gte('recorded_at', since.toISOString())
         .order('recorded_at', { ascending: true })
         .order('id', { ascending: true })
@@ -2408,6 +2414,7 @@ function setupDashboardInteractions() {
       'MAC address': laptop?.mac_address || registration?.mac_address || '—',
       'Device ID': registration?.registration_id || '—',
       'Connection status': getDeviceConnectionStatus(registration),
+      'Work session status': employee.work_status || 'Clocked Out',
       'Last seen': formatDate(laptop?.last_seen_at || registration?.last_heartbeat_at),
       'Assignment date': assignment ? formatDate(assignment.assigned_at) : '—',
     };
@@ -2693,6 +2700,13 @@ function setupDashboardInteractions() {
         disposal_laptop_cleanup_days: Number(form.elements.disposalCleanupDays.value),
         assignment_retention_days: Number(form.elements.assignmentRetentionDays.value),
       }), 'retentionSettingsState');
+      bindSettingsForm('overtimeSettingsForm', (form) => {
+        const hours = Number(form.elements.maximumOvertimeHours.value);
+        if (!Number.isFinite(hours) || hours < 0.25 || hours > 24) {
+          throw new Error('Maximum overtime duration must be between 0.25 and 24 hours.');
+        }
+        return { maximum_overtime_hours: hours };
+      }, 'overtimeSettingsState');
       document.getElementById('incognitoSettingsForm')?.addEventListener('submit', async (event) => {
         event.preventDefault();
         try {

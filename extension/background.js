@@ -3,7 +3,7 @@ importScripts('config.js');
 const blockRuleIdStart = 1001;
 const extensionSessionKey = 'mindlock-extension-session';
 const policySyncAlarm = 'mindlock-policy-sync';
-const policySyncPeriodMinutes = 1;
+const policySyncPeriodMinutes = 0.5;
 const usageSyncAlarm = 'mindlock-usage-sync';
 const usageSyncPeriodMinutes = 0.5;
 const heartbeatAlarm = 'mindlock-extension-heartbeat';
@@ -20,6 +20,7 @@ let focusedWindowId = null;
 let heartbeatInProgress = false;
 let authorizedWorkSession = false;
 let serverWorkSessionActive = false;
+let activeAttendanceContext = null;
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -31,9 +32,9 @@ function isScheduleActive(rule, now = new Date()) {
   const end = String(rule.end_time || '23:59').slice(0, 5);
   const overnight = start > end;
   const afterStart = current >= start;
-  const beforeEnd = current <= end;
+  const beforeEnd = current < end;
   if (overnight && !afterStart && !beforeEnd) return false;
-  if (!overnight && !(current >= start && current <= end)) return false;
+  if (!overnight && !(current >= start && current < end)) return false;
   const scheduleDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
   if (overnight && beforeEnd && !afterStart) scheduleDate.setUTCDate(scheduleDate.getUTCDate() - 1);
   const day = scheduleDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toLowerCase();
@@ -87,6 +88,25 @@ function getTrackedDomain(url) {
   }
 }
 
+async function reloadTabsForDomains(domains) {
+  const normalizedDomains = [...new Set(domains.map(normalizeDomain).filter(Boolean))];
+  if (!normalizedDomains.length) return;
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  await Promise.all(tabs
+    .filter((tab) => {
+      if (!Number.isInteger(tab.id) || !tab.url) return false;
+      try {
+        const hostname = normalizeDomain(new URL(tab.url).hostname);
+        return normalizedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+      } catch {
+        return false;
+      }
+    })
+    .map((tab) => chrome.tabs.reload(tab.id).catch((error) => {
+      console.warn('[LOCTIV BLOCKING] Could not reload an updated website tab:', error);
+    })));
+}
+
 async function flushWebsiteUsage() {
   if (!await syncAuthoritativeWorkSession()) {
     await ensureUsageStateLoaded();
@@ -118,6 +138,10 @@ async function flushWebsiteUsage() {
       entry,
       profile_id: session.user.id,
       employee_id: employeeId,
+      laptop_id: entry.laptopId || null,
+      attendance_session_id: entry.attendanceSessionId || null,
+      browser_mode: entry.incognito ? 'Incognito' : 'Normal',
+      client_event_id: entry.clientEventId || (entry.clientEventId = crypto.randomUUID()),
       domain: entry.domain,
       visit_count: entry.visitCount,
       total_seconds: Math.max(0, entry.secondsPending + (entry.startedAt === null ? 0 : Math.floor((now - entry.startedAt) / 1000))),
@@ -125,12 +149,12 @@ async function flushWebsiteUsage() {
     }))
     .filter((row) => row.domain && (row.visit_count || row.total_seconds || row.bytes_used));
   if (!rows.length) return;
-  const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_usage_logs`, {
+  const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/website_usage_logs?on_conflict=client_event_id`, {
     method: 'POST',
     headers: {
       ...headers,
       'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
+      Prefer: 'resolution=ignore-duplicates,return=minimal',
     },
     body: JSON.stringify(rows.map(({ entry, ...row }) => row)),
   });
@@ -141,6 +165,7 @@ async function flushWebsiteUsage() {
       current.secondsPending = 0;
       current.visitCount = 0;
       current.bytesUsed = 0;
+      current.clientEventId = null;
       if (current.startedAt !== null) current.startedAt = now;
       if (current.closed || current.ended) activeUsage.delete(entryId);
       break;
@@ -192,15 +217,6 @@ async function isAuthorizedWorkSession() {
     authorizedWorkSession = false;
     return false;
   }
-  const endAt = new Date(session.scheduled_end_at).getTime();
-  if (!Number.isFinite(endAt) || endAt <= Date.now()) {
-    authorizedWorkSession = false;
-    await chrome.storage.local.remove(workSessionStorageKey);
-    await ensureUsageStateLoaded();
-    activeUsage.clear();
-    await saveUsageState();
-    return false;
-  }
   if (session.lunch_enabled && session.lunch_start && session.lunch_end) {
     const parts = getZonedClock(new Date(), 'Asia/Manila');
     const inLunch = parts.time >= String(session.lunch_start).slice(0, 5)
@@ -213,6 +229,10 @@ async function isAuthorizedWorkSession() {
       return false;
     }
   }
+  activeAttendanceContext = {
+    sessionId: session.session_id,
+    laptopId: session.laptop_id || null,
+  };
   authorizedWorkSession = true;
   return true;
 }
@@ -260,6 +280,7 @@ async function syncAuthoritativeWorkSession() {
   await chrome.storage.local.set({
     [workSessionStorageKey]: {
       session_id: active.id,
+      laptop_id: active.laptop_id || null,
       scheduled_end_at: active.scheduled_end_at,
       clock_in_at: active.clock_in_at,
       lunch_enabled: Boolean(status.schedule?.lunch_enabled),
@@ -288,13 +309,13 @@ function getOpenUsageEntry(tabId) {
   return [...activeUsage.values()].find((entry) => entry.tabId === tabId && entry.current && !entry.closed);
 }
 
-function trackTabVisit(tabId, url, windowId) {
+function trackTabVisit(tabId, url, windowId, incognito = false) {
   if (!authorizedWorkSession) return;
   const domain = getTrackedDomain(url);
   if (!domain) return;
   const now = Date.now();
   const current = getOpenUsageEntry(tabId);
-  if (current?.domain === domain) {
+  if (current?.domain === domain && current.incognito === Boolean(incognito)) {
     current.windowId = windowId ?? current.windowId;
     if (current.startedAt === null) current.startedAt = now;
     return;
@@ -309,6 +330,9 @@ function trackTabVisit(tabId, url, windowId) {
     tabId,
     windowId,
     domain,
+    incognito: Boolean(incognito),
+    attendanceSessionId: activeAttendanceContext?.sessionId || null,
+    laptopId: activeAttendanceContext?.laptopId || null,
     startedAt: now,
     secondsPending: 0,
     visitCount: 1,
@@ -330,7 +354,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
       if (entry.windowId === windowId && entry.tabId !== tabId) stopUsageEntry(entry, now);
     });
     const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab?.url) trackTabVisit(tabId, tab.url, windowId);
+    if (tab?.url) trackTabVisit(tabId, tab.url, windowId, tab.incognito);
     await saveUsageState();
   } catch (error) {
     console.error('[LOCTIV ANALYTICS] Could not update active tab tracking:', error);
@@ -343,7 +367,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (!await isAuthorizedWorkSession()) return;
     if (!await hasExtensionUsageSession()) return;
     if (await getFocusedWindowId() !== tab.windowId) return;
-    trackTabVisit(tabId, tab.url, tab.windowId);
+    trackTabVisit(tabId, tab.url, tab.windowId, tab.incognito);
     await saveUsageState();
   } catch (error) {
     console.error('[LOCTIV ANALYTICS] Could not record active website navigation:', error);
@@ -370,7 +394,7 @@ async function trackActiveTabs() {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
   const tabs = await chrome.tabs.query({ active: true, windowId });
   tabs.forEach((tab) => {
-    if (Number.isInteger(tab.id) && tab.url) trackTabVisit(tab.id, tab.url, tab.windowId);
+    if (Number.isInteger(tab.id) && tab.url) trackTabVisit(tab.id, tab.url, tab.windowId, tab.incognito);
   });
   await saveUsageState();
 }
@@ -402,7 +426,7 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
       if (await hasExtensionUsageSession()) {
         const tabs = await chrome.tabs.query({ active: true, windowId });
         tabs.forEach((tab) => {
-          if (Number.isInteger(tab.id) && tab.url) trackTabVisit(tab.id, tab.url, windowId);
+          if (Number.isInteger(tab.id) && tab.url) trackTabVisit(tab.id, tab.url, windowId, tab.incognito);
         });
       }
     }
@@ -613,14 +637,17 @@ async function loadBlockingSchedules(session) {
 async function syncBlockingRules(sessionOverride = null) {
   const cached = await chrome.storage.local.get(['mindlock-blocking-policies']);
   const session = sessionOverride || await getValidExtensionSession();
-  if (!await isAuthorizedWorkSession()) {
+  const workSessionAuthorized = await isAuthorizedWorkSession();
+  if (!workSessionAuthorized) {
     const rules = await chrome.declarativeNetRequest.getDynamicRules();
     const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
+    const removedDomains = managedRules.flatMap((rule) => rule.condition?.requestDomains || []);
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: managedRules.map((rule) => rule.id),
       addRules: [],
     });
     await chrome.storage.local.set({ 'mindlock-blocking-policies': [] });
+    await reloadTabsForDomains(removedDomains);
     return {
       domains: [],
       installedRuleCount: 0,
@@ -661,7 +688,7 @@ async function syncBlockingRules(sessionOverride = null) {
   }
   const domains = schedules.filter((rule) => {
     if (session && rule.target_profile_id && rule.target_profile_id !== session.user.id) return false;
-    return isScheduleActive(rule);
+    return workSessionAuthorized ? rule.is_active !== false : isScheduleActive(rule);
   }).map((rule) => normalizeDomain(rule.domain));
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
@@ -705,21 +732,11 @@ async function syncBlockingRules(sessionOverride = null) {
     throw new Error('The browser did not install the active website blocking rules. Reload the extension and try again.');
   }
   const normalizedDomains = [...activeDomains].sort();
-  const newlyActiveDomains = normalizedDomains.filter((domain) => !installedDomainsBeforeUpdate.includes(domain));
-  if (newlyActiveDomains.length) {
-    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
-    await Promise.all(tabs
-      .filter((tab) => {
-        if (!tab.id || !tab.url) return false;
-        try {
-          const hostname = new URL(tab.url).hostname.toLowerCase().replace(/^www\./, '');
-          return newlyActiveDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-        } catch {
-          return false;
-        }
-      })
-      .map((tab) => chrome.tabs.reload(tab.id).catch(() => undefined)));
-  }
+  const changedDomains = [
+    ...installedDomainsBeforeUpdate.filter((domain) => !normalizedDomains.includes(domain)),
+    ...normalizedDomains.filter((domain) => !installedDomainsBeforeUpdate.includes(domain)),
+  ];
+  await reloadTabsForDomains(changedDomains);
   return {
     domains: normalizedDomains,
     installedRuleCount: installedActiveDomains.length,
@@ -831,7 +848,7 @@ async function sendExtensionHeartbeat() {
         await setHeartbeatStatus('offline', 'Lunch break. Analytics and work-session heartbeat are paused.');
       } else {
         await chrome.alarms.clear(heartbeatAlarm);
-        await setHeartbeatStatus('offline', 'Off Duty. The work-session heartbeat is stopped.');
+        await setHeartbeatStatus('offline', 'Clocked Out. The work-session heartbeat is stopped.');
       }
       return;
     }

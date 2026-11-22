@@ -67,6 +67,7 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Run `supabase/migrations/027_named_bulk_blocking_templates.sql` after migration 026 to group multiple domains into named templates for bulk employee assignments.
 - Run `supabase/migrations/028_work_session_and_blocking_sync.sql` after migration 027 to correct blocking-policy duplicate checks, enforce active work sessions for analytics uploads, and keep laptop connectivity dependent on successful heartbeats rather than attendance status.
 - Run `supabase/migrations/029_employee_blocking_policy_groups.sql` after migration 028 to label bulk-assigned employee policy groups and enable safe deletion of assigned website policies.
+- Run `supabase/migrations/030_overtime_incognito_eligibility.sql` after migration 029 to add overtime and extended-session statuses, overtime notifications and settings, private-browsing analytics deduplication, and stricter assignment/ticket validation.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js` or the extension.
 - Deploy legacy endpoints with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt` if they are still used. The registration endpoint checks the admin JWT itself; legacy device heartbeat authenticates the registration credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.
@@ -75,7 +76,7 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Create employee accounts from the admin dashboard after deploying `employee-account`; it creates the Supabase Auth user and matching `profiles`, `employees`, and `user_roles` rows automatically. Create the first administrator account through Supabase Auth, then create its profile and administrator role during initial setup. Do not insert users directly into Supabase's `auth` tables.
 - Employee account deletion retains ticket, message, attachment, assignment, and note history; references to the deleted profile are cleared by migrations 013 and 014.
 - Add the project URL and public anon key to both `admin/config.js` and `extension/config.js`. Never put a Supabase service-role key in the dashboard or extension.
-- Enable the extension for incognito use in the browser's extension settings if the organization's policy requires blocking there; browsers do not allow an extension to silently enable itself in incognito.
+- In Chrome, enable **Allow in Incognito** on `chrome://extensions`; in Edge, enable **Allow in InPrivate** on `edge://extensions`. LOCTIV cannot silently enable itself or bypass browser policy.
 - Apply and verify your Supabase Auth, Storage, and Realtime settings before deployment. Ticket attachments use the private `ticket-attachments` bucket created by migration 003.
 
 ## Notes

@@ -208,8 +208,8 @@ async function refreshClockStatus() {
     const status = await restRequest('rpc/get_my_work_status', { method: 'POST', body: {} });
     currentWorkSchedule = status.schedule || null;
     document.getElementById('clockEmployee').textContent = employeeProfile.full_name || employeeRecord.user_id;
-    document.getElementById('clockWorkStatus').textContent = status.work_status || 'Off Duty';
-    document.getElementById('clockWorkStatus').classList.toggle('is-offline', status.work_status !== 'Working');
+    document.getElementById('clockWorkStatus').textContent = status.work_status || 'Clocked Out';
+    document.getElementById('clockWorkStatus').classList.toggle('is-offline', status.work_status === 'Offline');
 
     const schedule = status.schedule;
     document.getElementById('clockSchedule').textContent = schedule
@@ -252,7 +252,7 @@ async function clockIn() {
     const session = await restRequest('rpc/clock_in_employee', { method: 'POST', body: {} });
     const status = await refreshClockStatus();
     if (status === null) {
-      if (!session?.session_id || !session.scheduled_end_at || new Date(session.scheduled_end_at).getTime() <= Date.now()) {
+      if (!session?.session_id || !session.scheduled_end_at) {
         throw new Error('Clock In was recorded, but the active session could not be synchronized. Reopen the extension while online.');
       }
       await extensionStorageSet({
