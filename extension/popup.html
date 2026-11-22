@@ -9,9 +9,12 @@
   </head>
   <body class="popup-body">
     <header class="popup-header">
-      <div>
-        <p class="eyebrow">Company laptop</p>
-        <h1>LOCTIV</h1>
+      <div class="popup-brand">
+        <img class="popup-brand-logo" src="logo.svg" alt="" />
+        <div>
+          <p class="eyebrow">Company laptop</p>
+          <h1>LOCTIV</h1>
+        </div>
       </div>
       <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch extension theme" title="Switch extension theme">☾</button>
     </header>
@@ -44,11 +47,11 @@
       <section class="card-block release-notes" aria-labelledby="extensionReleaseTitle">
         <div class="section-title-row">
           <h2 id="extensionReleaseTitle">What’s new</h2>
-          <span class="theme-pill">v1.2.3</span>
+          <span class="theme-pill" id="extensionReleaseVersion">Current version</span>
         </div>
-        <p class="muted-copy">Employee-extension updates from the admin release notes.</p>
+        <p class="muted-copy">Latest employee-extension updates.</p>
         <ul class="release-list">
-          <li><strong>v1.2.13:</strong> Analytics and heartbeat synchronization are faster and schedule-independent.</li>
+          <li><strong>v1.2.14:</strong> Employee website activity syncs more frequently and displays time under one minute.</li>
           <li><strong>v1.2.2:</strong> Closed tickets no longer accept employee replies or attachments.</li>
           <li><strong>v1.2.0:</strong> Improved employee sign-in password visibility in light and dark mode.</li>
           <li><strong>v1.1.0:</strong> Added support for employee-specific website blocking schedules.</li>

@@ -15,9 +15,8 @@ let ticketRealtimeChannel = null;
 let ticketListRealtimeChannel = null;
 let monitoringRealtimeChannel = null;
 let ticketPollTimer = null;
-let analyticsMetric = 'time';
 let analyticsRecords = [];
-let selectedAnalyticsEmployeeId = null;
+let dashboardAnalyticsRecords = [];
 let ticketCategories = [];
 let directoryEmployees = [];
 let directoryLaptops = [];
@@ -187,6 +186,57 @@ function getPhilippinesDayKeys(date = new Date()) {
 function getPhilippinesStartOfDay(date = new Date()) {
   const [year, month, day] = getPhilippinesDateKey(date).split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day) - PHILIPPINES_UTC_OFFSET_MS);
+}
+
+function getAnalyticsDateRange() {
+  const fromInput = document.getElementById('analyticsDateFrom');
+  const toInput = document.getElementById('analyticsDateTo');
+  if (!fromInput || !toInput) return null;
+  if (!fromInput.value && !toInput.value) {
+    const days = getPhilippinesDayKeys();
+    fromInput.value = days[0];
+    toInput.value = days[days.length - 1];
+  }
+  return { fromDate: fromInput.value, toDate: toInput.value };
+}
+
+function getAnalyticsDateBuckets(fromDate, toDate, period = 'daily') {
+  const [fromYear, fromMonth, fromDay] = fromDate.split('-').map(Number);
+  const [toYear, toMonth, toDay] = toDate.split('-').map(Number);
+  const start = Date.UTC(fromYear, fromMonth - 1, fromDay);
+  const end = Date.UTC(toYear, toMonth - 1, toDay);
+  const buckets = [];
+  if (period === 'monthly') {
+    for (let cursor = new Date(Date.UTC(fromYear, fromMonth - 1, 1)); cursor.getTime() <= end;) {
+      const monthStart = cursor.getTime();
+      const monthEnd = Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0);
+      const bucketStart = new Date(Math.max(start, monthStart)).toISOString().slice(0, 10);
+      const bucketEnd = new Date(Math.min(end, monthEnd)).toISOString().slice(0, 10);
+      buckets.push({
+        startDate: bucketStart,
+        endDate: bucketEnd,
+        label: new Intl.DateTimeFormat('en-PH', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+          .format(new Date(monthStart)),
+      });
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+    }
+  } else {
+    const bucketDays = period === 'weekly' ? 7 : 1;
+    const dayCount = Math.floor((end - start) / 86400000) + 1;
+    for (let offset = 0; offset < dayCount; offset += bucketDays) {
+      const bucketStart = new Date(start + offset * 86400000).toISOString().slice(0, 10);
+      const bucketEnd = new Date(start + Math.min(offset + bucketDays - 1, dayCount - 1) * 86400000)
+        .toISOString().slice(0, 10);
+      buckets.push({
+        startDate: bucketStart,
+        endDate: bucketEnd,
+        label: bucketDays === 1
+          ? formatAnalyticsDay(bucketStart)
+          : `${formatAnalyticsDay(bucketStart)}–${formatAnalyticsDay(bucketEnd)}`,
+      });
+    }
+  }
+  return buckets;
 }
 
 function updatePhilippinesClock() {
@@ -484,10 +534,26 @@ function renderNotifications() {
           <small>${escapeHtml(item.body)}</small>
           <time>${escapeHtml(formatDate(item.created_at))}</time>
         </button>
+        <button type="button" class="notification-delete-btn" data-delete-notification-id="${escapeHtml(item.id)}" aria-label="Delete notification">×</button>
       </li>`).join('')
     : '<li class="empty-notification">No notifications.</li>';
   if (container) container.innerHTML = markup;
   if (modalList) modalList.innerHTML = markup;
+}
+
+async function deleteNotification(notificationId) {
+  if (!supabaseClient || !adminUser) throw new Error('The admin session is not available.');
+  const { data, error } = await supabaseClient.from('notifications')
+    .delete()
+    .eq('id', notificationId)
+    .eq('user_id', adminUser.id)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('Notification was not found or could not be deleted.');
+  notifications = notifications.filter((notification) => notification.id !== notificationId);
+  renderNotifications();
+  updateNotificationBell();
 }
 
 function renderBarChart() {
@@ -495,7 +561,7 @@ function renderBarChart() {
   if (!usageChart) return;
 
   const dailyUsage = new Map();
-  getSelectedAnalyticsRecords(analyticsRecords).forEach((row) => {
+  getSelectedAnalyticsRecords(dashboardAnalyticsRecords).forEach((row) => {
     const dateKey = getPhilippinesDateKey(new Date(row.recorded_at));
     dailyUsage.set(dateKey, (dailyUsage.get(dateKey) || 0) + Number(row.total_seconds || 0) / 60);
   });
@@ -528,7 +594,7 @@ function formatUsageDuration(seconds) {
 
 function getSelectedAnalyticsRecords(records) {
   const employeeId = document.getElementById('analyticsEmployeeFilter')?.value || '';
-  return employeeId ? records.filter((row) => row.employee_id === employeeId) : records;
+  return employeeId ? records.filter((row) => (row.employee_id || row.profile_id) === employeeId) : records;
 }
 
 function renderAnalyticsEmployeeFilter() {
@@ -571,7 +637,7 @@ function renderAnalyticsWebsiteTable(records) {
   table.innerHTML = [...totals.values()]
     .sort((a, b) => b.seconds - a.seconds || b.bytes - a.bytes)
     .map((row) => `<tr>
-      <td><button type="button" class="analytics-employee-link" data-analytics-employee-id="${escapeHtml(row.employeeId)}" aria-label="View analytics for ${escapeHtml(row.employeeName)}">${escapeHtml(row.employeeUserId)}<small>${escapeHtml(row.employeeName)}</small></button></td>
+      <td><span class="analytics-employee-label">${escapeHtml(row.employeeUserId)}<small>${escapeHtml(row.employeeName)}</small></span></td>
       <td>${formatUsageDuration(row.seconds)}</td>
       <td>${(row.bytes / (1024 * 1024)).toFixed(2)} MB</td>
       <td>${row.visits}</td>
@@ -591,54 +657,6 @@ function getConnectedRegisteredEmployees() {
     const heartbeatAge = now - new Date(registration.last_heartbeat_at).getTime();
     return heartbeatAge >= -30000 && heartbeatAge < 120000;
   });
-}
-
-function renderAnalyticsEmployeeDetail(employeeId) {
-  const employee = getConnectedRegisteredEmployees().find((row) => row.id === employeeId);
-  const panel = document.getElementById('analyticsEmployeeDetail');
-  if (!employee || !panel) {
-    panel?.classList.add('hidden');
-    return;
-  }
-  selectedAnalyticsEmployeeId = employeeId;
-  const records = getSelectedAnalyticsRecords(analyticsRecords).filter((row) =>
-    (row.employee_id || row.profile_id) === employeeId);
-  const byDomain = new Map();
-  records.forEach((record) => {
-    const domain = record.domain || 'Unknown website';
-    const total = byDomain.get(domain) || { seconds: 0, bytes: 0, visits: 0 };
-    total.seconds += Number(record.total_seconds) || 0;
-    total.bytes += Number(record.bytes_used) || 0;
-    total.visits += Number(record.visit_count) || 0;
-    byDomain.set(domain, total);
-  });
-  const rankedSites = [...byDomain.entries()].sort((a, b) => b[1].visits - a[1].visits || b[1].seconds - a[1].seconds);
-  const seconds = records.reduce((sum, record) => sum + (Number(record.total_seconds) || 0), 0);
-  const bytes = records.reduce((sum, record) => sum + (Number(record.bytes_used) || 0), 0);
-  const visits = records.reduce((sum, record) => sum + (Number(record.visit_count) || 0), 0);
-  document.getElementById('analyticsEmployeeDetailTitle').textContent = `${employee.name} (${employee.user_id})`;
-  document.getElementById('analyticsEmployeeDetailStats').innerHTML = [
-    { label: 'Time spent', value: formatUsageDuration(seconds) },
-    { label: 'Data usage', value: `${(bytes / (1024 * 1024)).toFixed(2)} MB` },
-    { label: 'Visits', value: String(visits) },
-    { label: 'Top website', value: rankedSites[0]?.[0] || 'No data' },
-  ].map((item) => `<article class="stat-card"><span class="metric-label">${escapeHtml(item.label)}</span><strong class="metric-value">${escapeHtml(item.value)}</strong></article>`).join('');
-  document.getElementById('analyticsEmployeeTopSites').innerHTML = rankedSites.slice(0, 5)
-    .map(([domain, total]) => `<li><span class="dot"></span><span>${escapeHtml(domain)} · ${formatUsageDuration(total.seconds)} · ${(total.bytes / (1024 * 1024)).toFixed(2)} MB</span></li>`)
-    .join('') || '<li>No website data recorded in the last seven days.</li>';
-  document.getElementById('analyticsEmployeeRecords').innerHTML = [...records]
-    .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at))
-    .map((record) => `<tr>
-      <td>${escapeHtml(record.domain || 'Unknown website')}</td>
-      <td>${escapeHtml(record.browser_mode || 'Normal')}</td>
-      <td>${escapeHtml(formatDate(record.recorded_at))}</td>
-      <td>${formatUsageDuration(Number(record.total_seconds) || 0)}</td>
-      <td>${((Number(record.bytes_used) || 0) / (1024 * 1024)).toFixed(2)} MB</td>
-      <td>${Number(record.visit_count) || 0}</td>
-    </tr>`)
-    .join('') || '<tr><td colspan="6">No website records for the last seven days.</td></tr>';
-  panel.classList.remove('hidden');
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function escapeHtml(value) {
@@ -800,7 +818,6 @@ function startBlockingRuleEdit(rule) {
   }
   document.getElementById('blockingEmployeePoliciesModal')?.classList.add('hidden');
   setActiveSection('blocking');
-  document.querySelector('[data-blocking-tab="bulk"]')?.click();
   const employeeSelect = document.getElementById('bulkBlockingTargetEmployee');
   if (employeeSelect) {
     employeeSelect.value = targetEmployee.id;
@@ -928,7 +945,6 @@ function renderLaptopTable() {
           <button type="button" class="text-btn view-laptop-details" data-laptop-id="${escapeHtml(row.id)}">View</button>
           <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
           ${registration ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>` : ''}
-          <button type="button" class="text-btn connection-history-laptop" data-laptop-id="${escapeHtml(row.id)}">History</button>
           <button type="button" class="text-btn blocking-delete-btn delete-laptop" data-laptop-id="${escapeHtml(row.id)}">Delete</button>
         </td>
       </tr>`;
@@ -1435,8 +1451,12 @@ function getEmployeeLaptopAssignment(employeeId) {
 }
 
 function statusPill(status) {
-  const style = status === 'Online' || status === 'Registered' ? 'success'
-    : status === 'Offline' ? 'warning' : 'neutral';
+  const normalized = String(status || '').toLowerCase();
+  const style = ['online', 'registered', 'active', 'working'].includes(normalized) ? 'success'
+    : ['lunch break', 'overtime'].includes(normalized) ? 'warning'
+      : ['offline', 'not connected', 'extended session', 'suspended'].includes(normalized) ? 'danger'
+        : normalized === 'clocked out' || normalized === 'off duty' || normalized === 'unregistered' ? 'neutral'
+          : 'accent';
   return `<span class="status-pill ${style}">${escapeHtml(status)}</span>`;
 }
 
@@ -1862,6 +1882,23 @@ async function sendTicketReply(event) {
   }
 }
 
+async function fetchAnalyticsRecords(client, since, until) {
+  const records = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await client.from('website_usage_logs')
+      .select('id,employee_id,profile_id,domain,visit_count,total_seconds,bytes_used,recorded_at')
+      .gte('recorded_at', since.toISOString())
+      .lt('recorded_at', until.toISOString())
+      .order('recorded_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) throw error;
+    records.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return records;
+}
+
 async function loadAnalyticsData() {
   if (analyticsLoadInProgress) {
     analyticsRefreshPending = true;
@@ -1871,33 +1908,58 @@ async function loadAnalyticsData() {
   const client = getSupabaseClient();
   const state = document.getElementById('analyticsState');
   try {
+    const rangeState = document.getElementById('analyticsRangeState');
+    const dateRange = getAnalyticsDateRange();
+    const isDateKey = (value) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const date = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    };
+    if (!dateRange?.fromDate || !dateRange?.toDate
+      || !isDateKey(dateRange.fromDate)
+      || !isDateKey(dateRange.toDate)) {
+      rangeState.textContent = 'Choose both a start date and an end date.';
+      rangeState.classList.remove('hidden');
+      rangeState.classList.add('error-text');
+      return;
+    }
+    if (dateRange.fromDate > dateRange.toDate) {
+      rangeState.textContent = 'Start date must be on or before the end date.';
+      rangeState.classList.remove('hidden');
+      rangeState.classList.add('error-text');
+      return;
+    }
+    rangeState.classList.add('hidden');
+    rangeState.classList.remove('error-text');
     if (!client) {
       state.textContent = 'Configure Supabase in admin/config.js to load real browsing analytics.';
       return;
     }
     state.textContent = 'Loading analytics…';
-    const since = getPhilippinesStartOfDay();
-    since.setUTCDate(since.getUTCDate() - 6);
-    const records = [];
-    for (let offset = 0; ; offset += 1000) {
-      const { data, error } = await client.from('website_usage_logs')
-        .select('id,employee_id,profile_id,domain,browser_mode,visit_count,total_seconds,bytes_used,recorded_at')
-        .gte('recorded_at', since.toISOString())
-        .order('recorded_at', { ascending: true })
-        .order('id', { ascending: true })
-        .range(offset, offset + 999);
-      if (error) {
-        state.textContent = `Could not load analytics: ${error.message}`;
-        state.classList.add('error-text');
-        return;
-      }
-      records.push(...(data || []));
-      if (!data || data.length < 1000) break;
-    }
+    state.classList.remove('hidden', 'error-text');
+    const since = new Date(`${dateRange.fromDate}T00:00:00+08:00`);
+    const until = new Date(`${dateRange.toDate}T00:00:00+08:00`);
+    until.setUTCDate(until.getUTCDate() + 1);
+    const dashboardSince = getPhilippinesStartOfDay();
+    dashboardSince.setUTCDate(dashboardSince.getUTCDate() - 6);
+    const dashboardUntil = getPhilippinesStartOfDay();
+    dashboardUntil.setUTCDate(dashboardUntil.getUTCDate() + 1);
+    const sameRange = since.getTime() === dashboardSince.getTime() && until.getTime() === dashboardUntil.getTime();
+    const [records, dashboardRecords] = await Promise.all([
+      fetchAnalyticsRecords(client, since, until),
+      sameRange ? Promise.resolve(null) : fetchAnalyticsRecords(client, dashboardSince, dashboardUntil),
+    ]);
+    const currentRange = getAnalyticsDateRange();
+    if (currentRange?.fromDate !== dateRange.fromDate || currentRange?.toDate !== dateRange.toDate) return;
     analyticsRecords = records;
+    dashboardAnalyticsRecords = dashboardRecords || records;
     state.classList.remove('error-text');
     renderAnalyticsData(analyticsRecords);
     renderBarChart();
+  } catch (error) {
+    state.textContent = `Could not load analytics: ${error.message}`;
+    state.classList.remove('hidden');
+    state.classList.add('error-text');
   } finally {
     analyticsLoadInProgress = false;
     if (analyticsRefreshPending) {
@@ -1907,61 +1969,180 @@ async function loadAnalyticsData() {
   }
 }
 
+function renderAnalyticsLineChart(target, buckets) {
+  if (!target) return;
+  const width = 1000;
+  const height = 300;
+  const left = 44;
+  const right = 18;
+  const top = 18;
+  const bottom = 56;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const maxVisits = Math.max(...buckets.map((bucket) => bucket.visits), 1);
+  const points = buckets.map((bucket, index) => ({
+    x: buckets.length === 1 ? left + plotWidth / 2 : left + (index / (buckets.length - 1)) * plotWidth,
+    y: top + plotHeight - (bucket.visits / maxVisits) * plotHeight,
+    ...bucket,
+  }));
+  const step = Math.max(1, Math.ceil(points.length / 10));
+  const grid = [0, 0.5, 1].map((fraction) => {
+    const y = top + plotHeight * fraction;
+    const value = Math.round(maxVisits * (1 - fraction));
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="analytics-line-grid"/>
+      <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="analytics-line-axis">${value}</text>`;
+  }).join('');
+  const labels = points.map((point, index) => index % step === 0 || index === points.length - 1
+    ? `<text x="${point.x}" y="${height - 18}" text-anchor="middle" class="analytics-line-axis">${escapeHtml(point.label)}</text>`
+    : '').join('');
+  const path = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+  const circles = points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4" class="analytics-line-point">
+    <title>${escapeHtml(point.label)}: ${point.visits} visits</title>
+  </circle>`).join('');
+  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Website visits by ${escapeHtml(document.getElementById('analyticsTrendPeriod')?.value || 'day')}">
+    ${grid}<path d="${path}" class="analytics-line-path"/>${circles}${labels}
+  </svg>`;
+}
+
+function renderAnalyticsHorizontalBars(target, rows, formatValue) {
+  if (!target) return;
+  if (!rows.length) {
+    target.innerHTML = '<p class="analytics-chart-empty">No records for this selection.</p>';
+    return;
+  }
+  const max = Math.max(...rows.map((row) => row.value), 1);
+  target.innerHTML = rows.map((row) => {
+    const width = Math.max((row.value / max) * 100, row.value ? 2 : 0);
+    return `<div class="analytics-horizontal-row" title="${escapeHtml(row.label)}: ${escapeHtml(formatValue(row.value))}">
+      <span class="analytics-horizontal-label">${escapeHtml(row.label)}</span>
+      <span class="analytics-horizontal-track"><i style="width:${width}%"></i></span>
+      <strong>${escapeHtml(formatValue(row.value))}</strong>
+    </div>`;
+  }).join('');
+}
+
+function getAnalyticsEmployeeStatuses() {
+  const statuses = ['Working', 'Lunch Break', 'Overtime', 'Extended Session', 'Clocked Out', 'Offline'];
+  const counts = new Map(statuses.map((status) => [status, 0]));
+  directoryEmployees.filter((employee) => employee.active).forEach((employee) => {
+    const assignment = getEmployeeLaptopAssignment(employee.id);
+    const registration = assignment ? getActiveDeviceRegistration(assignment.laptop) : null;
+    let status = String(employee.work_status || 'Clocked Out').trim();
+    if (assignment && getDeviceConnectionStatus(registration) !== 'Online') {
+      status = 'Offline';
+    } else if (status.toLowerCase() === 'off duty') {
+      status = 'Clocked Out';
+    }
+    if (!counts.has(status)) status = 'Clocked Out';
+    counts.set(status, counts.get(status) + 1);
+  });
+  return [...counts.entries()];
+}
+
+function renderAnalyticsVisualizations(records, dateRange) {
+  const period = document.getElementById('analyticsTrendPeriod')?.value || 'daily';
+  const buckets = getAnalyticsDateBuckets(dateRange.fromDate, dateRange.toDate, period)
+    .map((bucket) => ({ ...bucket, visits: 0 }));
+  records.forEach((row) => {
+    const dateKey = getPhilippinesDateKey(new Date(row.recorded_at));
+    const bucket = buckets.find((item) => dateKey >= item.startDate && dateKey <= item.endDate);
+    if (bucket) bucket.visits += Number(row.visit_count) || 0;
+  });
+  renderAnalyticsLineChart(document.getElementById('analyticsChart'), buckets);
+
+  const visitsBySite = new Map();
+  const secondsBySite = new Map();
+  records.forEach((row) => {
+    const domain = row.domain || 'Unknown website';
+    visitsBySite.set(domain, (visitsBySite.get(domain) || 0) + (Number(row.visit_count) || 0));
+    secondsBySite.set(domain, (secondsBySite.get(domain) || 0) + (Number(row.total_seconds) || 0));
+  });
+  const topSites = [...visitsBySite.entries()].map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value).slice(0, 8);
+  const topTime = [...secondsBySite.entries()].map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value).slice(0, 8);
+  renderAnalyticsHorizontalBars(document.getElementById('analyticsTopSites'), topSites, (value) => `${value} visits`);
+  renderAnalyticsHorizontalBars(document.getElementById('analyticsWebsiteTime'), topTime, formatUsageDuration);
+
+  const employees = new Map(getConnectedRegisteredEmployees().map((employee) => [employee.id, employee]));
+  const visitsByEmployee = new Map();
+  records.forEach((row) => {
+    const id = row.employee_id || row.profile_id;
+    if (!employees.has(id)) return;
+    visitsByEmployee.set(id, (visitsByEmployee.get(id) || 0) + (Number(row.visit_count) || 0));
+  });
+  const employeeUsage = [...visitsByEmployee.entries()].map(([id, value]) => {
+    const employee = employees.get(id);
+    return { label: `${employee.userId} · ${employee.name}`, value };
+  }).sort((a, b) => b.value - a.value).slice(0, 8);
+  renderAnalyticsHorizontalBars(document.getElementById('analyticsEmployeeUsage'), employeeUsage, (value) => `${value} visits`);
+
+  const allowedVisits = records.reduce((sum, row) => sum + (Number(row.visit_count) || 0), 0);
+  const blockedChart = document.getElementById('analyticsBlockedAllowed');
+  if (blockedChart) {
+    blockedChart.innerHTML = `<div class="analytics-donut analytics-donut-unavailable" role="img" aria-label="Blocked website attempt totals are not available">
+        <div><strong>—</strong><span>Blocked data<br>unavailable</span></div>
+      </div>
+      <div class="analytics-donut-legend">
+        <span><i class="donut-swatch allowed"></i>Allowed visits tracked: <strong>${allowedVisits}</strong></span>
+        <span><i class="donut-swatch unavailable"></i>Blocked attempts: <strong>Not recorded</strong></span>
+      </div>`;
+  }
+
+  const statusColors = {
+    Working: '#4B87B3',
+    'Lunch Break': '#D6A84F',
+    Overtime: '#7866A8',
+    'Extended Session': '#C45A5A',
+    'Clocked Out': '#9CAFC0',
+    Offline: '#1B2A38',
+  };
+  const statusRows = getAnalyticsEmployeeStatuses();
+  const totalEmployees = statusRows.reduce((sum, [, count]) => sum + count, 0);
+  let angle = 0;
+  const gradient = totalEmployees ? statusRows.map(([status, count]) => {
+    const start = angle;
+    angle += count / totalEmployees * 360;
+    return `${statusColors[status]} ${start}deg ${angle}deg`;
+  }).join(', ') : 'var(--border) 0deg 360deg';
+  const statusChart = document.getElementById('analyticsEmployeeStatus');
+  if (statusChart) {
+    statusChart.innerHTML = `<div class="analytics-donut" role="img" aria-label="Status distribution across ${totalEmployees} active employees"
+        style="background:conic-gradient(${gradient})">
+        <div><strong>${totalEmployees}</strong><span>employees</span></div>
+      </div>
+      <div class="analytics-donut-legend">${statusRows.map(([status, count]) => `
+        <span><i class="donut-swatch" style="--donut-color:${statusColors[status]}"></i>${escapeHtml(status)}: <strong>${count}</strong></span>
+      `).join('')}</div>`;
+  }
+}
+
 function renderAnalyticsData(records) {
   const stats = document.getElementById('analyticsStats');
-  const chart = document.getElementById('analyticsChart');
-  const sites = document.getElementById('topSitesList');
   const state = document.getElementById('analyticsState');
-  const title = document.getElementById('analyticsChartTitle');
+  const dateRange = getAnalyticsDateRange();
+  if (!dateRange || dateRange.fromDate > dateRange.toDate) return;
+  const rangeLabel = dateRange.fromDate === dateRange.toDate
+    ? dateRange.fromDate
+    : `${dateRange.fromDate} to ${dateRange.toDate}`;
+  document.getElementById('analyticsRangeDescription').textContent =
+    `Showing ${document.getElementById('analyticsEmployeeFilter').selectedOptions[0]?.textContent || 'all connected employees'} from ${rangeLabel} (Philippine time).`;
   const visibleRecords = getSelectedAnalyticsRecords(records);
-  const labels = getPhilippinesDayKeys();
-  const recordsByDay = new Map();
-  visibleRecords.forEach((row) => {
-    const dateKey = getPhilippinesDateKey(new Date(row.recorded_at));
-    const daily = recordsByDay.get(dateKey) || [];
-    daily.push(row);
-    recordsByDay.set(dateKey, daily);
-  });
-  const byDay = labels.map((date) => {
-    const rows = recordsByDay.get(date) || [];
-    return {
-      label: formatAnalyticsDay(date),
-      time: rows.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0),
-      data: rows.reduce((sum, row) => sum + (Number(row.bytes_used) || 0), 0) / (1024 * 1024),
-      visits: rows.reduce((sum, row) => sum + (Number(row.visit_count) || 0), 0),
-    };
-  });
   const timeTotal = visibleRecords.reduce((sum, row) => sum + (Number(row.total_seconds) || 0), 0);
   const mbTotal = visibleRecords.reduce((sum, row) => sum + (Number(row.bytes_used) || 0), 0) / (1024 * 1024);
   const uniqueSites = new Set(visibleRecords.map((row) => row.domain).filter(Boolean)).size;
   stats.innerHTML = [
-    { label: 'Time spent', value: `${(timeTotal / 3600).toFixed(1)} h`, trend: 'last 7 days' },
-    { label: 'Data usage', value: `${mbTotal.toFixed(2)} MB`, trend: 'last 7 days' },
-    { label: 'Unique websites', value: String(uniqueSites), trend: 'last 7 days' },
+    { label: 'Time spent', value: `${(timeTotal / 3600).toFixed(1)} h`, trend: rangeLabel },
+    { label: 'Data usage', value: `${mbTotal.toFixed(2)} MB`, trend: rangeLabel },
+    { label: 'Unique websites', value: String(uniqueSites), trend: rangeLabel },
   ].map((item) => `<article class="stat-card"><span class="metric-label">${item.label}</span><strong class="metric-value">${item.value}</strong><span class="metric-trend positive">${item.trend}</span></article>`).join('');
+  document.getElementById('analyticsChartSubtitle').textContent =
+    `Website visits grouped ${document.getElementById('analyticsTrendPeriod')?.value || 'daily'} using Philippine time (Asia/Manila).`;
   renderAnalyticsWebsiteTable(visibleRecords);
-  if (selectedAnalyticsEmployeeId) renderAnalyticsEmployeeDetail(selectedAnalyticsEmployeeId);
-  const metric = analyticsMetric === 'data' ? 'data' : analyticsMetric === 'sites' ? 'visits' : 'time';
-  const metricTitle = analyticsMetric === 'data' ? 'Data usage (MB)' : analyticsMetric === 'sites' ? 'Website visits' : 'Website time spent';
-  title.textContent = metricTitle;
-  sites.classList.toggle('hidden', analyticsMetric !== 'sites');
-  chart.classList.toggle('hidden', analyticsMetric === 'sites');
-  if (analyticsMetric === 'sites') {
-    const rankedSites = new Map();
-    visibleRecords.forEach((row) => rankedSites.set(row.domain, (rankedSites.get(row.domain) || 0) + (Number(row.visit_count) || 0)));
-    sites.innerHTML = [...rankedSites.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
-      .map(([domain, visits]) => `<li><span class="dot"></span><span>${escapeHtml(domain)} — ${visits} visits</span></li>`).join('');
-    state.textContent = visibleRecords.length ? '' : 'No usage records were reported for this selection in the last 7 days.';
-  } else {
-    const max = Math.max(...byDay.map((row) => row[metric]), 0);
-    chart.innerHTML = byDay.map((row) => {
-      const value = row[metric];
-      const height = max ? Math.max(4, value / max * 100) : 0;
-      const displayValue = analyticsMetric === 'data' ? `${value.toFixed(1)} MB` : `${(value / 3600).toFixed(1)} h`;
-      return `<div class="graph-column"><span class="graph-value">${displayValue}</span><div class="graph-track"><i style="height:${height}%"></i></div><small>${row.label}</small></div>`;
-    }).join('');
-    state.textContent = visibleRecords.length ? '' : 'No usage records were reported for this selection in the last 7 days.';
-  }
+  renderAnalyticsVisualizations(visibleRecords, dateRange);
+  state.textContent = visibleRecords.length
+    ? ''
+    : `No usage records were reported for this selection from ${rangeLabel}.`;
   state.classList.toggle('hidden', Boolean(visibleRecords.length));
 }
 
@@ -2251,30 +2432,9 @@ function setActiveSection(name) {
 
 function setupDashboardInteractions() {
   setupEmployeeScheduleInteractions();
-  document.getElementById('analyticsWebsiteTable')?.addEventListener('click', (event) => {
-    const button = event.target.closest('.analytics-employee-link');
-    if (button) renderAnalyticsEmployeeDetail(button.dataset.analyticsEmployeeId);
-  });
-  document.getElementById('closeAnalyticsEmployeeDetail')?.addEventListener('click', () => {
-    selectedAnalyticsEmployeeId = null;
-    document.getElementById('analyticsEmployeeDetail').classList.add('hidden');
-  });
   document.querySelectorAll('.nav-link[data-section]').forEach((button) => {
     button.addEventListener('click', () => setActiveSection(button.dataset.section));
   });
-  document.querySelectorAll('[data-blocking-tab]').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('[data-blocking-tab]').forEach((item) => {
-        const active = item === tab;
-        item.classList.toggle('active', active);
-        item.setAttribute('aria-selected', String(active));
-      });
-      document.querySelectorAll('[data-blocking-panel]').forEach((panel) => {
-        panel.classList.toggle('active', panel.dataset.blockingPanel === tab.dataset.blockingTab);
-      });
-    });
-  });
-
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
@@ -2349,10 +2509,6 @@ function setupDashboardInteractions() {
         'Registration status': registration ? 'Registered' : 'Unregistered',
         'Last seen': formatDate(registration ? registration.last_heartbeat_at : laptop.last_seen_at),
         'Assignment date': assignment ? formatDate(assignment.assigned_at) : '—',
-        'Registration history': deviceRegistrations
-          .filter((entry) => entry.laptop_id === laptop.id)
-          .map((entry) => `${entry.registration_id}: ${entry.is_active ? 'Registered' : 'Revoked'} (${formatDate(entry.revoked_at || entry.created_at)})`)
-          .join('\n') || 'No registrations',
       };
       document.getElementById('userDetailsTitle').textContent = `Laptop ${laptop.laptop_id}`;
       document.getElementById('userDetailsContent').innerHTML = Object.entries(details)
@@ -2365,12 +2521,6 @@ function setupDashboardInteractions() {
       document.getElementById('assignmentLaptop').value = laptop.id;
       document.getElementById('assignmentForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
       document.getElementById('assignmentEmployee').focus({ preventScroll: true });
-      return;
-    }
-    if (button.classList.contains('connection-history-laptop')) {
-      document.getElementById('connectionLaptopFilter').value = laptop.id;
-      renderConnectionHistory();
-      document.getElementById('connectionHistoryModal').classList.remove('hidden');
       return;
     }
     if (button.classList.contains('delete-laptop')) {
@@ -2471,28 +2621,52 @@ function setupDashboardInteractions() {
     }
   });
   document.getElementById('notificationBellBtn')?.addEventListener('click', openNotifications);
-  document.getElementById('notificationsModalList')?.addEventListener('click', async (event) => {
-    const item = event.target instanceof Element ? event.target.closest('.notification-item') : null;
-    if (!item) return;
-    try {
-      await openNotificationTicket(item.dataset.notificationId);
-    } catch (error) {
-      const state = document.getElementById('notificationsModalState');
-      state.textContent = `Notification could not be marked as read: ${error.message}`;
-      state.classList.remove('hidden');
-      state.classList.add('error-text');
+  const handleNotificationListClick = async (event, inModal) => {
+    const deleteButton = event.target instanceof Element ? event.target.closest('[data-delete-notification-id]') : null;
+    if (deleteButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteButton.disabled = true;
+      try {
+        await deleteNotification(deleteButton.dataset.deleteNotificationId);
+        if (inModal) {
+          const state = document.getElementById('notificationsModalState');
+          state.classList.add('hidden');
+          state.classList.remove('error-text');
+        } else {
+          showToast('Notification deleted.');
+        }
+      } catch (error) {
+        deleteButton.disabled = false;
+        if (inModal) {
+          const state = document.getElementById('notificationsModalState');
+          state.textContent = `Notification could not be deleted: ${error.message}`;
+          state.classList.remove('hidden');
+          state.classList.add('error-text');
+        } else {
+          showToast(`Notification could not be deleted: ${error.message}`, true);
+        }
+      }
+      return;
     }
-  });
-  document.getElementById('notificationList')?.addEventListener('click', async (event) => {
     const item = event.target instanceof Element ? event.target.closest('.notification-item') : null;
     if (!item) return;
     try {
       const openedTicket = await openNotificationTicket(item.dataset.notificationId);
-      if (!openedTicket) document.getElementById('notificationsModal')?.classList.remove('hidden');
+      if (!inModal && !openedTicket) document.getElementById('notificationsModal')?.classList.remove('hidden');
     } catch (error) {
-      showToast(`Notification could not be marked as read: ${error.message}`, true);
+      if (inModal) {
+        const state = document.getElementById('notificationsModalState');
+        state.textContent = `Notification could not be marked as read: ${error.message}`;
+        state.classList.remove('hidden');
+        state.classList.add('error-text');
+      } else {
+        showToast(`Notification could not be marked as read: ${error.message}`, true);
+      }
     }
-  });
+  };
+  document.getElementById('notificationsModalList')?.addEventListener('click', (event) => handleNotificationListClick(event, true));
+  document.getElementById('notificationList')?.addEventListener('click', (event) => handleNotificationListClick(event, false));
   document.getElementById('markAllNotificationsReadBtn')?.addEventListener('click', async () => {
     try {
       await markNotificationsRead(notifications.filter((notification) => !notification.is_read).map((notification) => notification.id));
@@ -3329,19 +3503,20 @@ function setupDashboardInteractions() {
       button.disabled = false;
     }
   });
-  document.querySelectorAll('[data-analytics-tab]').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      analyticsMetric = tab.dataset.analyticsTab;
-      document.querySelectorAll('[data-analytics-tab]').forEach((item) => {
-        item.classList.toggle('active', item === tab);
-        item.setAttribute('aria-selected', String(item === tab));
-      });
-      renderAnalyticsData(analyticsRecords);
-    });
+  document.getElementById('analyticsTrendPeriod')?.addEventListener('change', () => {
+    renderAnalyticsData(analyticsRecords);
   });
   document.getElementById('analyticsEmployeeFilter')?.addEventListener('change', () => {
     renderAnalyticsData(analyticsRecords);
     renderBarChart();
+  });
+  document.getElementById('applyAnalyticsDateRange')?.addEventListener('click', () => {
+    loadAnalyticsData().catch((error) => showToast(`Analytics refresh failed: ${error.message}`, true));
+  });
+  ['analyticsDateFrom', 'analyticsDateTo'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      document.getElementById('analyticsRangeState')?.classList.add('hidden');
+    });
   });
   document.getElementById('syncSystemBtn')?.addEventListener('click', syncSystem);
 

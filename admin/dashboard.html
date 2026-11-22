@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LOCTIV Admin Dashboard</title>
     <link rel="icon" href="logo.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=1.2.2" />
+    <link rel="stylesheet" href="styles.css?v=1.2.14" />
   </head>
   <body class="dashboard-page">
     <div class="app-shell">
@@ -106,58 +106,80 @@
               <div class="card-header">
                 <h3>Notifications</h3>
               </div>
-              <ul class="notification-list" id="notificationList"></ul>
+              <ul class="notification-list dashboard-notification-list" id="notificationList"></ul>
             </div>
           </div>
 
         </section>
 
         <section id="analytics" class="module-panel">
-          <div class="stats-grid" id="analyticsStats"></div>
-          <div class="panel-card">
-            <div class="card-header">
-              <div>
-                <h3 id="analyticsChartTitle">Website time spent</h3>
-                <p class="panel-subtitle">Daily totals for the last 7 days, using Philippine time (Asia/Manila). New activity appears as soon as it syncs; the extension uploads every 30 seconds.</p>
-              </div>
-              <div class="analytics-tabs" role="tablist" aria-label="Analytics metric">
-                <button class="analytics-tab active" role="tab" aria-selected="true" data-analytics-tab="time">Time spent</button>
-                <button class="analytics-tab" role="tab" aria-selected="false" data-analytics-tab="data">Data usage (MB)</button>
-                <button class="analytics-tab" role="tab" aria-selected="false" data-analytics-tab="sites">Top websites</button>
-              </div>
+          <div class="panel-card analytics-range-card">
+            <div class="filter-row analytics-range-filters">
+              <label>Start date <input id="analyticsDateFrom" type="date" /></label>
+              <label>End date <input id="analyticsDateTo" type="date" /></label>
+              <button type="button" class="primary-btn small-btn" id="applyAnalyticsDateRange">Apply date range</button>
             </div>
-            <p class="analytics-state" id="analyticsState" role="status">Configure Supabase to load analytics from device usage records.</p>
-            <div class="analytics-chart" id="analyticsChart" aria-label="Website usage chart"></div>
-            <ul class="activity-list analytics-site-list hidden" id="topSitesList"></ul>
+            <p class="panel-subtitle" id="analyticsRangeDescription">Showing all connected employees for the selected Philippine-time date range.</p>
+            <p class="form-state hidden" id="analyticsRangeState" role="status"></p>
+          </div>
+          <div class="stats-grid" id="analyticsStats"></div>
+          <div class="analytics-chart-grid">
+            <article class="panel-card analytics-visual-card analytics-trend-card">
+              <div class="card-header">
+                <div>
+                  <h3>Website Usage Trend</h3>
+                  <p class="panel-subtitle" id="analyticsChartSubtitle">Website visits grouped by day, Philippine time.</p>
+                </div>
+                <label class="analytics-period-filter"><span>Group by</span>
+                  <select id="analyticsTrendPeriod" aria-label="Website trend grouping">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </label>
+              </div>
+              <p class="analytics-state" id="analyticsState" role="status">Configure Supabase to load analytics from device usage records.</p>
+              <div class="analytics-line-chart" id="analyticsChart" aria-label="Website usage trend line chart"></div>
+            </article>
+            <article class="panel-card analytics-visual-card">
+              <h3>Blocked vs. Allowed Website Attempts</h3>
+              <p class="panel-subtitle">Allowed visits are based on recorded website usage.</p>
+              <div id="analyticsBlockedAllowed" class="analytics-donut-wrap"></div>
+              <p class="analytics-chart-note">Blocked-attempt events are not currently stored, so a blocked count or ratio cannot be reported.</p>
+            </article>
+            <article class="panel-card analytics-visual-card">
+              <h3>Most Visited Websites</h3>
+              <p class="panel-subtitle">Visit counts for the selected date range.</p>
+              <div id="analyticsTopSites" class="analytics-horizontal-bars"></div>
+            </article>
+            <article class="panel-card analytics-visual-card">
+              <h3>Website Time Consumption</h3>
+              <p class="panel-subtitle">Time spent per website in the selected date range.</p>
+              <div id="analyticsWebsiteTime" class="analytics-horizontal-bars"></div>
+            </article>
+            <article class="panel-card analytics-visual-card">
+              <h3>Website Usage by Employee</h3>
+              <p class="panel-subtitle">Website visits per connected employee.</p>
+              <div id="analyticsEmployeeUsage" class="analytics-horizontal-bars"></div>
+            </article>
+            <article class="panel-card analytics-visual-card">
+              <h3>Employee Status Distribution</h3>
+              <p class="panel-subtitle">Current status; Offline reflects laptop connectivity, not clock-out.</p>
+              <div id="analyticsEmployeeStatus" class="analytics-donut-wrap"></div>
+            </article>
           </div>
           <div class="panel-card">
             <div class="card-header">
-              <div><h3>Website usage by employee</h3><p class="panel-subtitle">Employee-level totals for the last 7 Philippine calendar days.</p></div>
+              <div><h3>Website usage by employee</h3><p class="panel-subtitle">Employee-level totals for the selected date range.</p></div>
               <label class="analytics-employee-filter"><span>Employee</span><select id="analyticsEmployeeFilter"><option value="">All employees</option></select></label>
             </div>
-            <p class="panel-subtitle">Only employees with an active registered laptop connection are listed. Click a user ID to view their seven-day records and top websites. MB uses browser-reported resource sizes and may be inaccurate for cached or cross-origin resources.</p>
+            <p class="panel-subtitle">Only employees with an active registered laptop connection are listed. Select an employee or All connected employees to filter the results. MB uses browser-reported resource sizes and may be inaccurate for cached or cross-origin resources.</p>
             <div class="table-scroll">
               <table>
                 <thead><tr><th>User ID</th><th>Time spent</th><th>Data usage</th><th>Visits</th></tr></thead>
                 <tbody id="analyticsWebsiteTable"></tbody>
               </table>
             </div>
-            <section id="analyticsEmployeeDetail" class="analytics-employee-detail hidden" aria-live="polite">
-              <div class="card-header">
-                <div><h3 id="analyticsEmployeeDetailTitle">Employee analytics</h3><p class="panel-subtitle">Detailed website records for the last seven days</p></div>
-                <button type="button" class="secondary-btn small-btn" id="closeAnalyticsEmployeeDetail">Close</button>
-              </div>
-              <div class="stats-grid" id="analyticsEmployeeDetailStats"></div>
-              <div class="analytics-employee-detail-content">
-                <div><h4>Top websites</h4><ul class="activity-list" id="analyticsEmployeeTopSites"></ul></div>
-                <div class="table-scroll">
-                  <table class="analytics-record-table">
-                    <thead><tr><th>Website</th><th>Browser mode</th><th>Recorded</th><th>Time spent</th><th>Data usage</th><th>Visits</th></tr></thead>
-                    <tbody id="analyticsEmployeeRecords"></tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
           </div>
         </section>
 
@@ -206,9 +228,6 @@
         </section>
 
         <section id="blocking" class="module-panel">
-          <div class="blocking-tabs" role="tablist" aria-label="Blocking schedule type">
-            <button type="button" class="blocking-tab active" role="tab" aria-selected="true" data-blocking-tab="bulk">Website Assignment</button>
-          </div>
           <div class="panel-card blocking-policy-panel active" data-blocking-panel="bulk">
             <div class="card-header">
               <div><h3>Website Assignment</h3><p class="panel-subtitle">Choose one employee and assign a saved website template.</p></div>
@@ -793,7 +812,7 @@
           <button class="icon-btn" data-close-modal aria-label="Close notifications">×</button>
         </div>
         <div class="notification-actions"><button class="text-btn" type="button" id="markAllNotificationsReadBtn">Mark all as read</button></div>
-        <ul class="notification-list" id="notificationsModalList"></ul>
+        <ul class="notification-list modal-notification-list" id="notificationsModalList"></ul>
         <p class="form-state hidden" id="notificationsModalState" role="status"></p>
       </section>
     </div>
@@ -802,6 +821,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
-  <script src="app.js?v=1.2.12"></script>
+  <script src="app.js?v=1.2.14"></script>
   </body>
 </html>

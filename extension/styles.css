@@ -54,6 +54,27 @@ body::-webkit-scrollbar {
   gap: 12px;
 }
 
+.popup-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.popup-brand-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+}
+
+.popup-brand .eyebrow {
+  margin: 0 0 3px;
+}
+
+.popup-brand h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
 .popup-header {
   position: sticky;
   top: -12px;

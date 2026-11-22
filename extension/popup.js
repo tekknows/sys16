@@ -26,6 +26,11 @@ function renderHeartbeatStatus(status) {
   help.classList.toggle('error-text', status.state === 'error');
 }
 
+function renderExtensionReleaseVersion() {
+  const versionLabel = document.getElementById('extensionReleaseVersion');
+  if (versionLabel) versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
+}
+
 function isSupabaseConfigured() {
   return Boolean(globalThis.MINDLOCK_CONFIG?.supabaseUrl && globalThis.MINDLOCK_CONFIG?.supabaseAnonKey);
 }
@@ -822,6 +827,7 @@ async function switchExtensionView(viewId) {
 }
 
 async function initPopup() {
+  renderExtensionReleaseVersion();
   const theme = await extensionStorageGet('mindlock-extension-theme');
   setExtensionTheme(theme['mindlock-extension-theme'] || 'light');
   document.getElementById('themeToggle').addEventListener('click', () => setExtensionTheme(employeeTheme === 'dark' ? 'light' : 'dark'));
