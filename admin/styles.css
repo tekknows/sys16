@@ -1857,41 +1857,31 @@ th {
   color: var(--text);
 }
 
-.analytics-line-chart {
+.analytics-trend-chart {
   width: 100%;
   min-height: 260px;
   overflow: hidden;
 }
 
-.analytics-line-chart svg {
+.analytics-trend-chart svg {
   display: block;
   width: 100%;
   min-height: 260px;
 }
 
-.analytics-line-grid {
+.analytics-trend-grid {
   stroke: var(--border);
   stroke-width: 1;
   stroke-dasharray: 4 5;
 }
 
-.analytics-line-axis {
+.analytics-trend-axis {
   fill: var(--text-soft);
   font-size: 12px;
 }
 
-.analytics-line-path {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.analytics-line-point {
-  fill: var(--surface);
-  stroke: var(--accent);
-  stroke-width: 3;
+.analytics-trend-bar {
+  fill: var(--accent);
 }
 
 .analytics-horizontal-bars {
@@ -2774,6 +2764,16 @@ th {
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow);
+}
+
+.employee-action-menu.is-open {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  right: auto;
+  bottom: auto;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 .employee-action-menu .text-btn {

@@ -2017,7 +2017,7 @@ async function loadAnalyticsData() {
   }
 }
 
-function renderAnalyticsLineChart(target, buckets) {
+function renderAnalyticsTrendChart(target, buckets) {
   if (!target) return;
   const width = 1000;
   const height = 300;
@@ -2028,27 +2028,28 @@ function renderAnalyticsLineChart(target, buckets) {
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const maxVisits = Math.max(...buckets.map((bucket) => bucket.visits), 1);
-  const points = buckets.map((bucket, index) => ({
-    x: buckets.length === 1 ? left + plotWidth / 2 : left + (index / (buckets.length - 1)) * plotWidth,
-    y: top + plotHeight - (bucket.visits / maxVisits) * plotHeight,
-    ...bucket,
-  }));
-  const step = Math.max(1, Math.ceil(points.length / 10));
+  const slotWidth = buckets.length ? plotWidth / buckets.length : plotWidth;
+  const barWidth = Math.max(1, Math.min(32, slotWidth * 0.62));
+  const bars = buckets.map((bucket, index) => {
+    const barHeight = (bucket.visits / maxVisits) * plotHeight;
+    const x = left + index * slotWidth + (slotWidth - barWidth) / 2;
+    const y = top + plotHeight - barHeight;
+    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" class="analytics-trend-bar">
+      <title>${escapeHtml(bucket.label)}: ${bucket.visits} visits</title>
+    </rect>`;
+  }).join('');
+  const step = Math.max(1, Math.ceil(buckets.length / 10));
   const grid = [0, 0.5, 1].map((fraction) => {
     const y = top + plotHeight * fraction;
     const value = Math.round(maxVisits * (1 - fraction));
-    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="analytics-line-grid"/>
-      <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="analytics-line-axis">${value}</text>`;
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="analytics-trend-grid"/>
+      <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="analytics-trend-axis">${value}</text>`;
   }).join('');
-  const labels = points.map((point, index) => index % step === 0 || index === points.length - 1
-    ? `<text x="${point.x}" y="${height - 18}" text-anchor="middle" class="analytics-line-axis">${escapeHtml(point.label)}</text>`
+  const labels = buckets.map((bucket, index) => index % step === 0 || index === buckets.length - 1
+    ? `<text x="${left + index * slotWidth + slotWidth / 2}" y="${height - 18}" text-anchor="middle" class="analytics-trend-axis">${escapeHtml(bucket.label)}</text>`
     : '').join('');
-  const path = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
-  const circles = points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4" class="analytics-line-point">
-    <title>${escapeHtml(point.label)}: ${point.visits} visits</title>
-  </circle>`).join('');
-  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Website visits by ${escapeHtml(document.getElementById('analyticsTrendPeriod')?.value || 'day')}">
-    ${grid}<path d="${path}" class="analytics-line-path"/>${circles}${labels}
+  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Website visits grouped by ${escapeHtml(document.getElementById('analyticsTrendPeriod')?.value || 'day')} shown as a bar chart">
+    ${grid}${bars}${labels}
   </svg>`;
 }
 
@@ -2096,7 +2097,7 @@ function renderAnalyticsVisualizations(records, dateRange) {
     const bucket = buckets.find((item) => dateKey >= item.startDate && dateKey <= item.endDate);
     if (bucket) bucket.visits += Number(row.visit_count) || 0;
   });
-  renderAnalyticsLineChart(document.getElementById('analyticsChart'), buckets);
+  renderAnalyticsTrendChart(document.getElementById('analyticsChart'), buckets);
 
   const visitsBySite = new Map();
   const secondsBySite = new Map();
@@ -3438,17 +3439,36 @@ function setupDashboardInteractions() {
   document.getElementById('employeeDepartmentFilter')?.addEventListener('change', renderEmployeeTable);
   document.getElementById('employeeStatusFilter')?.addEventListener('change', renderEmployeeTable);
   document.getElementById('employeeTable')?.addEventListener('click', async (event) => {
-    const actionsButton = event.target.closest('.employee-actions-btn');
+    const actionsButton = event.target instanceof Element ? event.target.closest('.employee-actions-btn') : null;
     if (actionsButton) {
       const menu = actionsButton.nextElementSibling;
       document.querySelectorAll('.employee-action-menu').forEach((item) => {
-        if (item !== menu) item.classList.add('hidden');
+        if (item !== menu) {
+          item.classList.add('hidden');
+          item.classList.remove('is-open');
+          item.style.removeProperty('left');
+          item.style.removeProperty('top');
+          item.previousElementSibling?.setAttribute('aria-expanded', 'false');
+        }
       });
-      menu?.classList.toggle('hidden');
-      actionsButton.setAttribute('aria-expanded', String(!menu?.classList.contains('hidden')));
+      const shouldOpen = menu?.classList.contains('hidden');
+      menu?.classList.toggle('hidden', !shouldOpen);
+      menu?.classList.toggle('is-open', Boolean(shouldOpen));
+      actionsButton.setAttribute('aria-expanded', String(Boolean(shouldOpen)));
+      if (shouldOpen && menu) {
+        const anchor = actionsButton.getBoundingClientRect();
+        const bounds = menu.getBoundingClientRect();
+        const topAbove = anchor.top - bounds.height - 6;
+        const top = topAbove >= 8
+          ? topAbove
+          : Math.min(anchor.bottom + 6, window.innerHeight - bounds.height - 8);
+        const left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8));
+        menu.style.left = `${left}px`;
+        menu.style.top = `${Math.max(8, top)}px`;
+      }
       return;
     }
-    const deleteButton = event.target.closest('.employee-delete-btn');
+    const deleteButton = event.target instanceof Element ? event.target.closest('.employee-delete-btn') : null;
     if (deleteButton) {
       const employee = directoryEmployees.find((row) => row.profile_id === deleteButton.dataset.employeeId);
       if (!employee || !window.confirm(`Delete ${employee.name} and their account permanently?`)) return;
@@ -3468,8 +3488,14 @@ function setupDashboardInteractions() {
       }
       return;
     }
-    const button = event.target.closest('.employee-password-btn');
+    const button = event.target instanceof Element ? event.target.closest('.employee-password-btn') : null;
     if (!button) return;
+    const menu = button.closest('.employee-action-menu');
+    menu?.classList.add('hidden');
+    menu?.classList.remove('is-open');
+    menu?.style.removeProperty('left');
+    menu?.style.removeProperty('top');
+    menu?.previousElementSibling?.setAttribute('aria-expanded', 'false');
     const employee = directoryEmployees.find((row) => row.profile_id === button.dataset.employeeId);
     if (!employee) return;
     const modal = document.getElementById('resetPasswordModal');
