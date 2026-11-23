@@ -2021,35 +2021,38 @@ function renderAnalyticsTrendChart(target, buckets) {
   if (!target) return;
   const width = 1000;
   const height = 300;
-  const left = 44;
+  const left = 18;
   const right = 18;
-  const top = 18;
-  const bottom = 56;
+  const top = 34;
+  const bottom = 38;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
-  const maxVisits = Math.max(...buckets.map((bucket) => bucket.visits), 1);
+  const maxHours = Math.max(...buckets.map((bucket) => bucket.hours), 0);
   const slotWidth = buckets.length ? plotWidth / buckets.length : plotWidth;
-  const barWidth = Math.max(1, Math.min(32, slotWidth * 0.62));
+  const barWidth = Math.max(2, Math.min(38, slotWidth * 0.42));
+  const step = Math.max(1, Math.ceil(buckets.length / 10));
   const bars = buckets.map((bucket, index) => {
-    const barHeight = (bucket.visits / maxVisits) * plotHeight;
+    const barHeight = maxHours ? (bucket.hours / maxHours) * plotHeight : 0;
     const x = left + index * slotWidth + (slotWidth - barWidth) / 2;
     const y = top + plotHeight - barHeight;
-    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" class="analytics-trend-bar">
-      <title>${escapeHtml(bucket.label)}: ${bucket.visits} visits</title>
-    </rect>`;
-  }).join('');
-  const step = Math.max(1, Math.ceil(buckets.length / 10));
-  const grid = [0, 0.5, 1].map((fraction) => {
-    const y = top + plotHeight * fraction;
-    const value = Math.round(maxVisits * (1 - fraction));
-    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="analytics-trend-grid"/>
-      <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="analytics-trend-axis">${value}</text>`;
+    const labelY = barHeight ? Math.max(14, y - 9) : top - 8;
+    const showValue = index % step === 0 || index === buckets.length - 1;
+    return `<rect x="${x}" y="${top}" width="${barWidth}" height="${plotHeight}" rx="${barWidth / 2}" class="analytics-trend-track"/>
+      ${barHeight ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="${Math.min(barWidth / 2, barHeight / 2)}" class="analytics-trend-bar"/>` : ''}
+      ${showValue ? `<text x="${x + barWidth / 2}" y="${labelY}" text-anchor="middle" class="analytics-trend-value">${bucket.hours.toFixed(1)} h</text>` : ''}
+      <title>${escapeHtml(bucket.label)}: ${bucket.hours.toFixed(1)} hours</title>`;
   }).join('');
   const labels = buckets.map((bucket, index) => index % step === 0 || index === buckets.length - 1
-    ? `<text x="${left + index * slotWidth + slotWidth / 2}" y="${height - 18}" text-anchor="middle" class="analytics-trend-axis">${escapeHtml(bucket.label)}</text>`
+    ? `<text x="${left + index * slotWidth + slotWidth / 2}" y="${height - 10}" text-anchor="middle" class="analytics-trend-axis">${escapeHtml(bucket.label)}</text>`
     : '').join('');
-  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Website visits grouped by ${escapeHtml(document.getElementById('analyticsTrendPeriod')?.value || 'day')} shown as a bar chart">
-    ${grid}${bars}${labels}
+  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Website time usage grouped by ${escapeHtml(document.getElementById('analyticsTrendPeriod')?.value || 'day')}, in hours">
+    <defs>
+      <linearGradient id="analyticsTrendFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#4ca878"/>
+        <stop offset="100%" stop-color="#829cf1"/>
+      </linearGradient>
+    </defs>
+    ${bars}${labels}
   </svg>`;
 }
 
@@ -2091,11 +2094,14 @@ function getAnalyticsEmployeeStatuses() {
 function renderAnalyticsVisualizations(records, dateRange) {
   const period = document.getElementById('analyticsTrendPeriod')?.value || 'daily';
   const buckets = getAnalyticsDateBuckets(dateRange.fromDate, dateRange.toDate, period)
-    .map((bucket) => ({ ...bucket, visits: 0 }));
+    .map((bucket) => ({ ...bucket, seconds: 0 }));
   records.forEach((row) => {
     const dateKey = getPhilippinesDateKey(new Date(row.recorded_at));
     const bucket = buckets.find((item) => dateKey >= item.startDate && dateKey <= item.endDate);
-    if (bucket) bucket.visits += Number(row.visit_count) || 0;
+    if (bucket) bucket.seconds += Number(row.total_seconds) || 0;
+  });
+  buckets.forEach((bucket) => {
+    bucket.hours = bucket.seconds / 3600;
   });
   renderAnalyticsTrendChart(document.getElementById('analyticsChart'), buckets);
 
@@ -2186,7 +2192,7 @@ function renderAnalyticsData(records) {
     { label: 'Unique websites', value: String(uniqueSites), trend: rangeLabel },
   ].map((item) => `<article class="stat-card"><span class="metric-label">${item.label}</span><strong class="metric-value">${item.value}</strong><span class="metric-trend positive">${item.trend}</span></article>`).join('');
   document.getElementById('analyticsChartSubtitle').textContent =
-    `Website visits grouped ${document.getElementById('analyticsTrendPeriod')?.value || 'daily'} using Philippine time (Asia/Manila).`;
+    `Website time grouped ${document.getElementById('analyticsTrendPeriod')?.value || 'daily'} using Philippine time (Asia/Manila).`;
   renderAnalyticsWebsiteTable(visibleRecords);
   renderAnalyticsVisualizations(visibleRecords, dateRange);
   state.textContent = visibleRecords.length

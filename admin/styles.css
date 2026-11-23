@@ -1869,19 +1869,23 @@ th {
   min-height: 260px;
 }
 
-.analytics-trend-grid {
-  stroke: var(--border);
-  stroke-width: 1;
-  stroke-dasharray: 4 5;
-}
-
 .analytics-trend-axis {
   fill: var(--text-soft);
   font-size: 12px;
 }
 
+.analytics-trend-value {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.analytics-trend-track {
+  fill: var(--bg-soft);
+}
+
 .analytics-trend-bar {
-  fill: var(--accent);
+  fill: url(#analyticsTrendFill);
 }
 
 .analytics-horizontal-bars {
