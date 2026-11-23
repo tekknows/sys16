@@ -70,8 +70,8 @@ Deno.serve(async (request) => {
 
     if (!heartbeatResponse.ok) {
       const details = await heartbeatResponse.text();
-      if (/inactive or mismatched|not actively assigned|invalid or revoked/i.test(details)) {
-        return jsonResponse({ error: 'The employee is not assigned to an active registered laptop.' }, 403);
+      if (/inactive or mismatched|not actively assigned|invalid or revoked|active Employee account is required|authenticated profile does not match/i.test(details)) {
+        return jsonResponse({ error: 'An active Employee account on an assigned registered laptop is required.' }, 403);
       }
       console.error('Extension heartbeat database update failed:', details);
       return jsonResponse({ error: 'The heartbeat could not be recorded. Retry on the next alarm.' }, 502);

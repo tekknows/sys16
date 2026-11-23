@@ -26,6 +26,7 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - `supabase/functions/device-heartbeat/` — credential-verified laptop heartbeat endpoint
 - `supabase/functions/extension-heartbeat/` — legacy JWT-authenticated heartbeat endpoint; the extension now calls the authenticated database RPC directly
 - `supabase/functions/employee-account/` — administrator-only employee Auth account and profile creation endpoint
+- `supabase/migrations/032_role_based_access_control.sql` — Administrator/IT Staff/Employee permissions, employee-only session enforcement, and RLS updates
 
 ## Quick start
 
@@ -69,6 +70,7 @@ LOCTIV is a browser-extension and admin-dashboard productivity platform built fo
 - Run `supabase/migrations/029_employee_blocking_policy_groups.sql` after migration 028 to label bulk-assigned employee policy groups and enable safe deletion of assigned website policies.
 - Run `supabase/migrations/030_overtime_incognito_eligibility.sql` after migration 029 to add overtime and extended-session statuses, overtime notifications and settings, private-browsing analytics deduplication, and stricter assignment/ticket validation.
 - Run `supabase/migrations/031_safe_laptop_retirement_delete.sql` after migration 030 to enable safe laptop retirement/deletion that blocks active work sessions and preserves historical records.
+- Run `supabase/migrations/032_role_based_access_control.sql` after migration 031 to enforce the revised Administrator, IT Staff, and Employee permissions in Supabase, including employee-only work sessions and analytics writes.
 - Deploy the `device-registration` and `device-heartbeat` Supabase Edge Functions. Keep `SUPABASE_SERVICE_ROLE_KEY` in the Edge Function environment only; never put it in `admin/config.js` or the extension.
 - Deploy legacy endpoints with `supabase functions deploy device-registration` and `supabase functions deploy device-heartbeat --no-verify-jwt` if they are still used. The registration endpoint checks the admin JWT itself; legacy device heartbeat authenticates the registration credential.
 - Deploy the employee account function with `supabase functions deploy employee-account`. The admin dashboard sends the employee's temporary password to this protected function; it is never stored in the `employees` table.

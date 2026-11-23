@@ -245,13 +245,34 @@ async function syncAuthoritativeWorkSession() {
   }
 
   const config = globalThis.MINDLOCK_CONFIG;
+  const headers = {
+    apikey: config.supabaseAnonKey,
+    Authorization: `Bearer ${session.access_token}`,
+  };
+  const roleResponse = await fetch(
+    `${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/user_roles?profile_id=eq.${encodeURIComponent(session.user.id)}&role_name=eq.Employee&revoked_at=is.null&select=role_name&limit=1`,
+    { headers },
+  );
+  if (!roleResponse.ok) throw new Error(`Could not verify the employee role (${roleResponse.status}).`);
+  const employeeRoles = await roleResponse.json();
+  if (!employeeRoles.length) {
+    serverWorkSessionActive = false;
+    authorizedWorkSession = false;
+    await chrome.storage.local.remove(workSessionStorageKey);
+    await chrome.alarms.clear(heartbeatAlarm);
+    await ensureUsageStateLoaded();
+    activeUsage.forEach((entry) => stopUsageEntry(entry));
+    activeUsage.clear();
+    await saveUsageState();
+    return false;
+  }
+
   const response = await fetch(
     `${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/rpc/get_my_work_status`,
     {
       method: 'POST',
       headers: {
-        apikey: config.supabaseAnonKey,
-        Authorization: `Bearer ${session.access_token}`,
+        ...headers,
         'Content-Type': 'application/json',
       },
       body: '{}',
@@ -521,12 +542,27 @@ async function loadBlockingSchedules(session) {
     const employees = await request(`employees?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id&limit=1`);
     const employeeId = employees[0]?.id;
     if (!employeeId) {
-      throw new Error(`No employee record found for authenticated profile ${session.user.id}`);
+      logBlocking('No employee record is available; no employee blocking policies will be applied', {
+        authenticatedUserId: session.user.id,
+      });
+      return [];
     }
-    const laptopAssignments = employeeId
-      ? await request(`laptop_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&status=eq.Active&select=laptop_id`)
-      : [];
-    const laptopIds = laptopAssignments.map((assignment) => assignment.laptop_id).filter(Boolean);
+    const laptopAssignments = await request(
+      `laptop_assignments?employee_id=eq.${encodeURIComponent(employeeId)}&status=eq.Active&select=laptop_id,expires_at,laptop:laptops(active,status)`,
+    );
+    const now = Date.now();
+    const laptopIds = laptopAssignments
+      .filter((assignment) => assignment.laptop?.active
+        && assignment.laptop.status !== 'Retired'
+        && (!assignment.expires_at || new Date(assignment.expires_at).getTime() > now))
+      .map((assignment) => assignment.laptop_id)
+      .filter(Boolean);
+    if (!laptopIds.length) {
+      logBlocking('No active assigned laptop is available; no blocking policies will be applied', {
+        employeeId,
+      });
+      return [];
+    }
     const assignmentFilters = [
       employeeId ? `employee_id.eq.${encodeURIComponent(employeeId)}` : null,
       ...laptopIds.map((laptopId) => `laptop_id.eq.${encodeURIComponent(laptopId)}`),
@@ -982,14 +1018,27 @@ async function checkForTicketReplies() {
   try {
     const session = await getValidExtensionSession();
     if (!session) return;
-    const response = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/ticket_messages?sender_role=neq.Employee&is_read=eq.false&select=id,ticket_id,message&order=created_at.desc&limit=10`, {
-      headers: {
-        apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
-        Authorization: `Bearer ${session.access_token}`,
-      },
+    const restUrl = `${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1`;
+    const headers = {
+      apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
+      Authorization: `Bearer ${session.access_token}`,
+    };
+    const ticketResponse = await fetch(`${restUrl}/tickets?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id,ticket_number,status&order=updated_at.desc&limit=50`, {
+      headers,
     });
-    if (!response.ok) return;
-    const unreadReplies = await response.json();
+    if (!ticketResponse.ok) throw new Error(`Ticket status check failed (${ticketResponse.status}).`);
+    const tickets = await ticketResponse.json();
+    const unreadReplies = tickets.length
+      ? await fetch(`${restUrl}/ticket_messages?ticket_id=in.(${tickets.map((ticket) => encodeURIComponent(ticket.id)).join(',')})&sender_role=neq.Employee&is_read=eq.false&select=id,ticket_id,message&order=created_at.desc&limit=10`, { headers })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Ticket reply check failed (${response.status}).`);
+          return response.json();
+        })
+      : [];
+    /*
+     * The extension is a personal-ticket surface even for staff accounts.
+     * Only inspect replies for tickets owned by the signed-in profile.
+     */
     const stored = await chrome.storage.local.get(notifiedRepliesKey);
     const notified = new Set(stored[notifiedRepliesKey] || []);
     const newReplies = unreadReplies.filter((reply) => !notified.has(reply.id));
@@ -1004,14 +1053,6 @@ async function checkForTicketReplies() {
     }
     if (newReplies.length) await chrome.storage.local.set({ [notifiedRepliesKey]: [...notified].slice(-100) });
 
-    const ticketResponse = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/tickets?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id,ticket_number,status&order=updated_at.desc&limit=50`, {
-      headers: {
-        apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    });
-    if (!ticketResponse.ok) throw new Error(`Ticket status check failed (${ticketResponse.status}).`);
-    const tickets = await ticketResponse.json();
     const statusStorage = await chrome.storage.local.get(notifiedStatusesKey);
     const knownStatuses = statusStorage[notifiedStatusesKey] || {};
     for (const ticket of tickets) {

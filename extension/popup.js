@@ -2,6 +2,7 @@ const EXTENSION_SESSION_KEY = 'mindlock-extension-session';
 let extensionSession = null;
 let employeeProfile = null;
 let employeeRecord = null;
+let employeeRole = null;
 let assignedDevice = null;
 let activeTicket = null;
 let ticketRefreshTimer = null;
@@ -134,6 +135,7 @@ async function signOut(updateUi = true) {
   extensionSession = null;
   employeeProfile = null;
   employeeRecord = null;
+  employeeRole = null;
   assignedDevice = null;
   await extensionStorageRemove(EXTENSION_SESSION_KEY);
   if (updateUi) showLogin();
@@ -156,21 +158,66 @@ function setExtensionTheme(theme) {
 }
 
 async function loadCurrentEmployee() {
-  const roles = await restRequest(`user_roles?profile_id=eq.${extensionSession.user.id}&role_name=eq.Employee&revoked_at=is.null&select=role_name&limit=1`);
-  if (!roles.length) throw new Error('This account does not have the Employee role.');
+  const roles = await restRequest(`user_roles?profile_id=eq.${extensionSession.user.id}&revoked_at=is.null&select=role_name&limit=10`);
+  employeeRole = ['Administrator', 'IT Staff', 'Employee']
+    .find((role) => roles.some((row) => row.role_name === role));
+  if (!employeeRole) throw new Error('This account does not have an active MINDLOCK role.');
   const profiles = await restRequest(`profiles?id=eq.${extensionSession.user.id}&select=id,full_name,email&limit=1`);
-  if (!profiles.length) throw new Error('Your employee profile is not set up. Contact IT.');
-  const employees = await restRequest(`employees?profile_id=eq.${extensionSession.user.id}&select=id,user_id,department,position&limit=1`);
-  if (!employees.length) throw new Error('Your employee record is not set up. Contact IT.');
+  if (!profiles.length) throw new Error('Your account profile is not set up. Contact IT.');
+  const employees = await restRequest(`employees?profile_id=eq.${extensionSession.user.id}&select=id,user_id,department,position,active&limit=1`);
   employeeProfile = profiles[0];
-  employeeRecord = employees[0];
+  employeeRecord = employees[0] || null;
+  if (employeeRole === 'Employee' && !employeeRecord) {
+    throw new Error('Your employee record is not set up. Contact IT.');
+  }
+  if (employeeRole === 'Employee' && !employeeRecord.active) {
+    throw new Error('This employee account is inactive. Contact IT to restore access.');
+  }
+}
+
+async function requireActiveLaptopAssignment() {
+  if (employeeRole !== 'Employee') {
+    await chrome.runtime.sendMessage({ type: 'work-session-changed', active: false });
+  }
+  if (!employeeRecord) {
+    if (employeeRole !== 'Employee') return null;
+  }
+  if (!employeeRecord) {
+    const error = new Error('An active laptop must be assigned to your account before you can use the employee extension. Contact IT.');
+    error.code = 'LAPTOP_NOT_ASSIGNED';
+    throw error;
+  }
+  const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop_id,expires_at,laptop:laptops(id,laptop_id,active,status)&order=assigned_at.desc&limit=10`);
+  const now = Date.now();
+  const assignment = assignments.find((row) => row.laptop
+    && row.laptop.active
+    && row.laptop.status !== 'Retired'
+    && (!row.expires_at || new Date(row.expires_at).getTime() > now));
+  if (assignment) return assignment;
+
+  await chrome.runtime.sendMessage({ type: 'work-session-changed', active: false });
+  if (employeeRole !== 'Employee') return null;
+  const error = new Error('An active laptop must be assigned to your account before you can use the employee extension. Contact IT.');
+  error.code = 'LAPTOP_NOT_ASSIGNED';
+  throw error;
 }
 
 async function loadAssignedDevice() {
   try {
-    const assignments = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop:laptops(id,laptop_id,device_registration_id,model,manufacturer,device_name,operating_system,active,last_seen_at,connectivity_status)&limit=1`);
-    assignedDevice = assignments[0]?.laptop || null;
-    document.getElementById('endpointEmployee').textContent = employeeProfile.full_name || employeeRecord.user_id;
+    if (!employeeRecord) {
+      assignedDevice = null;
+      document.getElementById('endpointEmployee').textContent = employeeProfile.full_name || employeeProfile.email;
+      document.getElementById('endpointDevice').textContent = 'Not assigned';
+      document.getElementById('endpointModel').textContent = '—';
+      updateDeviceStatus();
+      return;
+    }
+    const assignment = await requireActiveLaptopAssignment();
+    const laptops = assignment
+      ? await restRequest(`laptops?id=eq.${assignment.laptop_id}&active=eq.true&status=neq.Retired&select=id,laptop_id,device_registration_id,model,manufacturer,device_name,operating_system,active,last_seen_at,connectivity_status&limit=1`)
+      : [];
+    assignedDevice = laptops[0] || null;
+    document.getElementById('endpointEmployee').textContent = employeeProfile.full_name || employeeRecord?.user_id || employeeProfile.email;
     document.getElementById('endpointDevice').textContent = assignedDevice?.laptop_id || 'Not assigned';
     document.getElementById('endpointModel').textContent = assignedDevice
       ? [assignedDevice.manufacturer, assignedDevice.model].filter(Boolean).join(' ') || assignedDevice.device_name || assignedDevice.operating_system || '—'
@@ -208,6 +255,7 @@ function updateDeviceStatus() {
 }
 
 async function refreshClockStatus() {
+  if (employeeRole !== 'Employee') return null;
   const state = document.getElementById('clockState');
   try {
     const status = await restRequest('rpc/get_my_work_status', { method: 'POST', body: {} });
@@ -225,8 +273,14 @@ async function refreshClockStatus() {
     document.getElementById('clockInTime').textContent = active?.clock_in_at
       ? new Date(active.clock_in_at).toLocaleString()
       : '—';
-    document.getElementById('clockInButton').classList.toggle('hidden', Boolean(active));
+    const clockInButton = document.getElementById('clockInButton');
+    clockInButton.classList.toggle('hidden', Boolean(active));
+    clockInButton.disabled = !schedule;
+    clockInButton.title = schedule ? '' : 'Clock In requires an active assigned schedule.';
     document.getElementById('clockOutButton').classList.toggle('hidden', !active);
+    state.textContent = !active && !schedule
+      ? 'Clock In is disabled until an active work schedule is assigned. You can still submit support tickets.'
+      : '';
 
     if (active) {
       await extensionStorageSet({
@@ -463,7 +517,13 @@ async function loadEmployeeUsageSummary() {
 }
 
 async function loadEmployeeHomeData() {
-  await Promise.all([loadAssignedDevice(), loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary(), refreshClockStatus()]);
+  await Promise.all([loadAssignedDevice(), loadEmployeeBlockingPolicies(), loadEmployeeUsageSummary()]);
+  if (employeeRole === 'Employee') {
+    await refreshClockStatus();
+  } else {
+    document.getElementById('clockWidget').classList.add('hidden');
+    document.getElementById('clockState').textContent = `${employeeRole} access is enabled. Work sessions and employee monitoring require an Employee account assigned to this laptop.`;
+  }
 }
 
 async function loadMyTickets() {
@@ -597,7 +657,10 @@ async function refreshEmployeeTicketStatus() {
 function renderEmployeeTicketActions() {
   const closed = activeTicket?.status === 'Closed';
   document.getElementById('employeeReplyForm').classList.toggle('hidden', closed);
-  document.getElementById('reopenTicketBtn').classList.toggle('hidden', activeTicket?.status !== 'Resolved');
+  document.getElementById('reopenTicketBtn').classList.toggle(
+    'hidden',
+    employeeRole !== 'Employee' || activeTicket?.status !== 'Resolved',
+  );
   const meta = document.querySelector('#employeeTicketInfo .ticket-detail-meta');
   if (meta && activeTicket) {
     meta.textContent = `${activeTicket.issue_category} · ${activeTicket.status} · ${activeTicket.priority || 'Normal'}`;
@@ -681,7 +744,7 @@ async function sendEmployeeReply(event) {
       body: {
         ticket_id: activeTicket.id,
         sender_id: extensionSession.user.id,
-        sender_role: 'Employee',
+        sender_role: employeeRole,
         message: message || `Attached a file: ${file.name}`,
       },
       prefer: 'return=representation',
@@ -714,6 +777,11 @@ async function loadIssueCategories() {
 
 async function submitEmployeeTicket(event) {
   event.preventDefault();
+  if (employeeRole !== 'Employee') {
+    document.getElementById('issueSubmitState').textContent = 'Only Employee accounts can submit issue reports from the extension.';
+    document.getElementById('issueSubmitState').classList.add('error-text');
+    return;
+  }
   const status = document.getElementById('issueSubmitState');
   const form = event.currentTarget;
   const submitButton = form.querySelector('button[type="submit"]');
@@ -722,7 +790,7 @@ async function submitEmployeeTicket(event) {
   submitButton.disabled = true;
   let createdTicket = null;
   try {
-    const [activeAssignment] = await restRequest(`laptop_assignments?employee_id=eq.${employeeRecord.id}&status=eq.Active&select=laptop_id&limit=1`);
+    const activeAssignment = await requireActiveLaptopAssignment();
     const descriptionParts = [
       document.getElementById('issueDescription').value.trim(),
       document.getElementById('issueAffectedService').value.trim()
@@ -787,12 +855,12 @@ async function signInEmployee(event) {
       password: document.getElementById('extensionPassword').value,
     });
     extensionSession = { ...session, expires_at: Math.floor(Date.now() / 1000) + session.expires_in };
-    await extensionStorageSet({ [EXTENSION_SESSION_KEY]: extensionSession });
     await loadCurrentEmployee();
+    await requireActiveLaptopAssignment();
+    await extensionStorageSet({ [EXTENSION_SESSION_KEY]: extensionSession });
     await showEmployeeApp();
   } catch (error) {
-    await extensionStorageRemove(EXTENSION_SESSION_KEY);
-    extensionSession = null;
+    await signOut(false);
     state.textContent = error.message;
     state.classList.add('error-text');
   } finally {
@@ -801,23 +869,46 @@ async function signInEmployee(event) {
 }
 
 async function showEmployeeApp() {
+  const isEmployee = employeeRole === 'Employee';
   document.getElementById('extensionLoginView').classList.add('hidden');
   document.getElementById('extensionApp').classList.remove('hidden');
+  document.getElementById('clockWidget').classList.toggle('hidden', !isEmployee);
+  document.getElementById('createTicketBtn').classList.toggle('hidden', !isEmployee);
+  document.querySelector('.extension-tab[data-view="reportView"]')?.classList.toggle('hidden', !isEmployee);
   await switchExtensionView('homeView');
   await loadEmployeeHomeData();
-  try {
-    await loadIssueCategories();
-  } catch (error) {
-    const status = document.getElementById('issueSubmitState');
-    status.textContent = `Report categories could not load: ${error.message}`;
-    status.classList.add('error-text');
+  if (isEmployee) {
+    try {
+      await loadIssueCategories();
+    } catch (error) {
+      const status = document.getElementById('issueSubmitState');
+      status.textContent = `Report categories could not load: ${error.message}`;
+      status.classList.add('error-text');
+    }
   }
   await loadMyTickets();
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
-  ticketRefreshTimer = setInterval(() => {
-    loadEmployeeHomeData();
-    loadMyTickets();
-  }, 30000);
+  ticketRefreshTimer = setInterval(refreshEmployeeApp, 30000);
+}
+
+async function refreshEmployeeApp() {
+  if (employeeRole === 'Employee') {
+    try {
+      await requireActiveLaptopAssignment();
+    } catch (error) {
+      if (error.code === 'LAPTOP_NOT_ASSIGNED') {
+        await signOut(false);
+        showLogin(error.message);
+        return;
+      }
+      const state = document.getElementById('heartbeatConnectionHelp');
+      state.textContent = `Could not verify laptop assignment: ${error.message}`;
+      state.classList.add('error-text');
+      return;
+    }
+  }
+  await loadEmployeeHomeData();
+  await loadMyTickets();
 }
 
 async function switchExtensionView(viewId) {
@@ -882,7 +973,22 @@ async function initPopup() {
     const tab = event.target.closest('.extension-tab[data-view]');
     if (tab) switchExtensionView(tab.dataset.view);
   });
-  document.getElementById('createTicketBtn').addEventListener('click', () => switchExtensionView('reportView'));
+  document.getElementById('createTicketBtn').addEventListener('click', async () => {
+    if (employeeRole !== 'Employee') return;
+    try {
+      await requireActiveLaptopAssignment();
+      await switchExtensionView('reportView');
+    } catch (error) {
+      if (error.code === 'LAPTOP_NOT_ASSIGNED') {
+        await signOut(false);
+        showLogin(error.message);
+      } else {
+        const state = document.getElementById('heartbeatConnectionHelp');
+        state.textContent = `Could not verify laptop assignment: ${error.message}`;
+        state.classList.add('error-text');
+      }
+    }
+  });
 
   if (!isSupabaseConfigured()) {
     showLogin('Configure Supabase in extension/config.js to sign in and access your tickets.');
@@ -894,6 +1000,7 @@ async function initPopup() {
   }
   try {
     await loadCurrentEmployee();
+    await requireActiveLaptopAssignment();
     await showEmployeeApp();
   } catch (error) {
     await signOut(false);

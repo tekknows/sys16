@@ -368,6 +368,29 @@ function applyTheme(themeName, accentColor, applyAccent = false) {
   });
 }
 
+function applyDashboardRoleAccess() {
+  const isITStaff = adminUser?.role === 'IT Staff';
+  document.body.dataset.userRole = isITStaff ? 'it-staff' : 'administrator';
+
+  document.getElementById('addEmployeeBtn')?.classList.toggle('hidden', isITStaff);
+  document.getElementById('addLaptopBtn')?.classList.toggle('hidden', isITStaff);
+
+  if (!isITStaff) return;
+  document.querySelectorAll('.settings-tabs .tab-link').forEach((tab) => {
+    tab.classList.toggle('hidden', tab.dataset.tab !== 'theme');
+  });
+  document.querySelectorAll('.settings-content .tab-panel').forEach((panel) => {
+    const active = panel.id === 'theme';
+    panel.classList.toggle('active', active);
+    panel.classList.toggle('hidden', !active);
+  });
+  document.querySelector('.settings-tabs .tab-link[data-tab="theme"]')?.classList.add('active');
+  document.getElementById('accentColor')?.closest('label')?.classList.add('hidden');
+  document.getElementById('accentPreview')?.classList.add('hidden');
+  document.getElementById('saveThemeSettingsBtn')?.classList.add('hidden');
+  document.getElementById('itThemeControls')?.classList.remove('hidden');
+}
+
 async function handleLogin(ev) {
   ev.preventDefault();
   const email = document.getElementById('email')?.value || '';
@@ -391,7 +414,12 @@ async function handleLogin(ev) {
       .eq('profile_id', data.user.id)
       .is('revoked_at', null);
     if (roleError) throw roleError;
-    const role = roleRows.find((row) => row.role_name === 'Administrator' || row.role_name === 'IT Staff')?.role_name;
+    const role = ['Administrator', 'IT Staff', 'Employee']
+      .find((candidate) => roleRows.some((row) => row.role_name === candidate));
+    if (role === 'Employee') {
+      await client.auth.signOut();
+      throw new Error('Access denied. Employee accounts cannot access the Admin Dashboard.');
+    }
     if (!role) {
       await client.auth.signOut();
       throw new Error('This account does not have administrator or IT staff access.');
@@ -419,6 +447,11 @@ function setupLoginPage() {
   const rememberedEmail = localStorage.getItem('mindlock-remember-admin');
   const themeState = readState();
   applyTheme(themeState.theme, null);
+  if (new URLSearchParams(window.location.search).get('access') === 'denied') {
+    const errorLabel = document.getElementById('loginError');
+    errorLabel.textContent = 'Access denied. Employee accounts cannot access the Admin Dashboard.';
+    errorLabel.classList.remove('hidden');
+  }
   document.getElementById('loginThemeToggleBtn')?.addEventListener('click', () => {
     const nextState = readState();
     nextState.theme = nextState.theme === 'dark' ? 'light' : 'dark';
@@ -899,7 +932,7 @@ function renderEmployeeTable() {
         <td>${statusPill(row.work_status || 'Clocked Out')}</td>
         <td>${escapeHtml(row.email)}</td>
         <td>${statusPill(row.active ? (row.account_status || 'Active') : 'Suspended')}</td>
-        <td>
+        <td>${adminUser?.role === 'Administrator' ? `
           <div class="employee-actions">
             <button type="button" class="icon-btn employee-actions-btn" aria-label="Employee actions" aria-expanded="false" title="Employee actions">⚙</button>
             <div class="employee-action-menu hidden">
@@ -907,7 +940,7 @@ function renderEmployeeTable() {
               <button type="button" class="text-btn employee-delete-btn" data-employee-id="${escapeHtml(row.profile_id)}">Delete</button>
             </div>
           </div>
-        </td>
+        ` : 'View only'}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="9">No employees found.</td></tr>';
 }
@@ -943,9 +976,11 @@ function renderLaptopTable() {
         <td>${escapeHtml(assignment ? formatDate(assignment.assigned_at) : '—')}</td>
         <td class="laptop-actions">
           <button type="button" class="text-btn view-laptop-details" data-laptop-id="${escapeHtml(row.id)}">View</button>
-          <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
-          ${registration ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>` : ''}
-          <button type="button" class="text-btn blocking-delete-btn delete-laptop" data-laptop-id="${escapeHtml(row.id)}">Delete</button>
+          ${adminUser?.role === 'Administrator' ? `
+            <button type="button" class="text-btn assign-laptop" data-laptop-id="${escapeHtml(row.id)}">${assignment ? 'Change employee' : 'Assign employee'}</button>
+            ${registration ? `<button type="button" class="text-btn revoke-device" data-laptop-id="${escapeHtml(row.id)}">Revoke</button>` : ''}
+            <button type="button" class="text-btn blocking-delete-btn delete-laptop" data-laptop-id="${escapeHtml(row.id)}">Delete</button>
+          ` : ''}
         </td>
       </tr>`;
     }).join('') || '<tr><td colspan="10">No laptops registered.</td></tr>';
@@ -1115,7 +1150,9 @@ async function loadDashboardData() {
       client.from('notifications').select('id,title,body,link,is_read,created_at').eq('user_id', adminUser.id).order('created_at', { ascending: false }).limit(10),
       client.from('device_registrations').select('id,laptop_id,registration_id,mac_address,is_active,last_heartbeat_at,created_at,revoked_at').order('created_at', { ascending: false }),
       client.from('device_connection_logs').select('id,laptop_id,employee_id,device_registration_id,connection_started_at,connection_ended_at,last_heartbeat_at,connection_status,recorded_at').order('recorded_at', { ascending: false }).limit(500),
-      client.from('system_settings').select('setting_key,setting_value'),
+      adminUser.role === 'Administrator'
+        ? client.from('system_settings').select('setting_key,setting_value')
+        : Promise.resolve({ data: [], error: null }),
     ]);
     let laptopResult = results[3];
     if (laptopResult.error && /mac_address|connectivity_status|work_session_id/i.test(laptopResult.error.message)) {
@@ -1165,7 +1202,13 @@ async function loadDashboardData() {
     const [employeeResult, profileResult, roleResult, , assignmentResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
     const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
-    const roles = new Map((roleResult.data || []).map((role) => [role.profile_id, role.role_name]));
+    const rolePriority = { Administrator: 3, 'IT Staff': 2, Employee: 1 };
+    const roles = new Map();
+    (roleResult.data || []).forEach((role) => {
+      if ((rolePriority[role.role_name] || 0) > (rolePriority[roles.get(role.profile_id)] || 0)) {
+        roles.set(role.profile_id, role.role_name);
+      }
+    });
     directoryEmployees = (employeeResult.data || []).map((employee) => {
       const profile = profiles.get(employee.profile_id) || {};
       return {
@@ -1401,21 +1444,26 @@ async function ensureAdminSession() {
       .select('role_name')
       .eq('profile_id', sessionData.session.user.id)
       .is('revoked_at', null);
-    const role = roleRows?.find((row) => row.role_name === 'Administrator' || row.role_name === 'IT Staff')?.role_name;
+    const role = ['Administrator', 'IT Staff']
+      .find((candidate) => roleRows?.some((row) => row.role_name === candidate));
     if (roleError || !role) {
       await client.auth.signOut();
-      window.location.href = 'index.html';
+      const isEmployee = !roleError && roleRows?.some((row) => row.role_name === 'Employee');
+      window.location.href = isEmployee ? 'index.html?access=denied' : 'index.html';
       return false;
     }
     adminUser = { id: sessionData.session.user.id, email: sessionData.session.user.email, role };
+    applyDashboardRoleAccess();
     const emailInput = document.querySelector('#changePasswordForm input[type="email"]');
     if (emailInput) emailInput.value = adminUser.email || '';
-    const profileUpdate = await client.from('profiles')
-      .update({ email: adminUser.email })
-      .eq('id', adminUser.id)
-      .neq('email', adminUser.email);
-    if (profileUpdate.error) {
-      setDashboardState(`Profile email could not be synchronized: ${profileUpdate.error.message}`, true);
+    if (adminUser.role === 'Administrator') {
+      const profileUpdate = await client.from('profiles')
+        .update({ email: adminUser.email })
+        .eq('id', adminUser.id)
+        .neq('email', adminUser.email);
+      if (profileUpdate.error) {
+        setDashboardState(`Profile email could not be synchronized: ${profileUpdate.error.message}`, true);
+      }
     }
     return true;
   }
@@ -2403,6 +2451,10 @@ function setupEmployeeScheduleInteractions() {
 }
 
 function setActiveSection(name) {
+  if (!document.getElementById(name)) {
+    showToast(`Dashboard section "${name}" is unavailable.`, true);
+    return;
+  }
   document.querySelectorAll('.nav-link[data-section]').forEach((button) => {
     button.classList.toggle('active', button.dataset.section === name);
   });
@@ -2718,18 +2770,25 @@ function setupDashboardInteractions() {
   });
   document.getElementById('changePasswordForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const fields = [...event.currentTarget.querySelectorAll('input[type="password"]')];
     const form = event.currentTarget;
-    const emailInput = form.querySelector('input[type="email"]');
+    const emailInput = form.elements.email;
+    const currentPassword = form.elements.currentPassword;
+    const newPassword = form.elements.newPassword;
+    const confirmPassword = form.elements.confirmPassword;
     const state = document.getElementById('accountFormState');
     const submit = form.querySelector('button[type="submit"]');
-    const [currentPassword, newPassword, confirmPassword] = fields;
     const showState = (message, isError = false) => {
       state.textContent = message;
       state.classList.remove('hidden');
       state.classList.toggle('error-text', isError);
       showToast(message, isError);
     };
+    if (newPassword.value && !currentPassword.value) {
+      currentPassword.setCustomValidity('Enter your current password to confirm this change.');
+      currentPassword.reportValidity();
+      return;
+    }
+    currentPassword.setCustomValidity('');
     if (newPassword.value && newPassword.value !== confirmPassword.value) {
       confirmPassword.setCustomValidity('Passwords do not match.');
       confirmPassword.reportValidity();
@@ -2747,13 +2806,21 @@ function setupDashboardInteractions() {
     try {
       const client = getSupabaseClient();
       if (!client || !adminUser) throw new Error('Your admin session has expired. Sign in again and retry.');
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError) throw userError;
+      const authenticatedEmail = userData.user?.email;
+      if (!authenticatedEmail || userData.user.id !== adminUser.id) {
+        throw new Error('Could not verify the signed-in administrator account. Sign in again and retry.');
+      }
       const { error: verifyError } = await client.auth.signInWithPassword({
-        email: adminUser.email,
+        email: authenticatedEmail,
         password: currentPassword.value,
       });
       if (verifyError) throw new Error(`Current password was not accepted: ${verifyError.message}`);
       const updates = {};
-      if (emailInput.value.trim() !== adminUser.email) updates.email = emailInput.value.trim();
+      if (emailInput.value.trim().toLowerCase() !== authenticatedEmail.toLowerCase()) {
+        updates.email = emailInput.value.trim();
+      }
       if (newPassword.value) updates.password = newPassword.value;
       if (!Object.keys(updates).length) {
         showState('No account changes to save.');
@@ -2764,12 +2831,16 @@ function setupDashboardInteractions() {
       adminUser.email = data.user.email;
       emailInput.value = adminUser.email;
       if (data.user.email === updates.email && updates.email) {
-        const { error: profileError } = await client.from('profiles').update({ email: data.user.email }).eq('id', adminUser.id);
+        const { error: profileError } = await client.from('profiles')
+          .update({ email: data.user.email })
+          .eq('id', adminUser.id);
         if (profileError) throw profileError;
       }
-      fields.forEach((field) => { field.value = ''; });
+      currentPassword.value = '';
+      newPassword.value = '';
+      confirmPassword.value = '';
       showState(updates.email && data.user.email !== updates.email
-        ? 'Password updated. Confirm the email change using the message sent to the new address.'
+        ? 'Account changes were submitted. Confirm the email change using the message sent to the new address.'
         : 'Account changes saved.');
     } catch (error) {
       showState(`Account changes failed: ${error.message}`, true);
@@ -2780,11 +2851,11 @@ function setupDashboardInteractions() {
   document.getElementById('changePasswordForm')?.addEventListener('reset', (event) => {
     const form = event.currentTarget;
     window.setTimeout(() => {
-      form.querySelector('input[type="email"]').value = adminUser.email || '';
+      form.elements.email.value = adminUser.email || '';
       document.getElementById('accountFormState').classList.add('hidden');
     }, 0);
   });
-  document.querySelectorAll('#changePasswordForm input[autocomplete="new-password"]').forEach((input) => {
+  document.querySelectorAll('#changePasswordForm input[name="currentPassword"], #changePasswordForm input[autocomplete="new-password"]').forEach((input) => {
     input.addEventListener('input', (event) => event.currentTarget.setCustomValidity(''));
   });
 
@@ -2836,6 +2907,7 @@ function setupDashboardInteractions() {
 
   document.querySelectorAll('.tab-link').forEach((tab) => {
     tab.addEventListener('click', () => {
+      if (adminUser?.role === 'IT Staff' && tab.dataset.tab !== 'theme') return;
       const target = document.getElementById(tab.dataset.tab);
       if (!target) {
         showToast(`Settings tab "${tab.dataset.tab}" is unavailable.`, true);
@@ -2845,6 +2917,9 @@ function setupDashboardInteractions() {
         const active = link === tab;
         link.classList.toggle('active', active);
         link.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.classList.toggle('hidden', panel !== target);
       });
 
       const bindSettingsForm = (id, settings, stateId) => {
@@ -2869,6 +2944,7 @@ function setupDashboardInteractions() {
             button.disabled = false;
           }
         });
+
       };
       bindSettingsForm('generalSettingsForm', (form) => ({
         company_name: { value: form.elements.companyName.value.trim() },
@@ -2934,6 +3010,15 @@ function setupDashboardInteractions() {
       document.querySelectorAll('.tab-panel').forEach((panel) => {
         panel.classList.toggle('active', panel === target);
       });
+    });
+  });
+
+  document.querySelectorAll('[data-theme-choice]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const state = readState();
+      state.theme = button.dataset.themeChoice;
+      applyTheme(state.theme, state.accent, true);
+      saveState(state);
     });
   });
 
@@ -3284,14 +3369,18 @@ function setupDashboardInteractions() {
           return;
         }
         let registrationError = null;
-        try {
-          await invokeSupabaseFunction('device-registration', {
-            action: 'register',
-            laptop_id: laptop.id,
-            mac_address: laptop.mac_address || null,
-          });
-        } catch (error) {
-          registrationError = error;
+        if (adminUser.role === 'Administrator') {
+          try {
+            await invokeSupabaseFunction('device-registration', {
+              action: 'register',
+              laptop_id: laptop.id,
+              mac_address: laptop.mac_address || null,
+            });
+          } catch (error) {
+            registrationError = error;
+          }
+        } else {
+          registrationError = new Error('An Administrator must register the laptop for its new assignment.');
         }
         let activityError = null;
         try {
@@ -3301,7 +3390,9 @@ function setupDashboardInteractions() {
         }
         await loadDashboardData();
         const statusMessage = registrationError
-          ? `Laptop ${laptop.laptop_id} was assigned to ${employee.name}, but device registration failed and remains Unregistered: ${registrationError.message}`
+          ? adminUser.role === 'Administrator'
+            ? `Laptop ${laptop.laptop_id} was assigned to ${employee.name}, but device registration failed: ${registrationError.message}`
+            : `Laptop ${laptop.laptop_id} was assigned to ${employee.name}. ${registrationError.message}`
           : `Laptop ${laptop.laptop_id} assigned to ${employee.name} and registered automatically. Previous assignments remain in history.`;
         setDashboardState(activityError ? `${statusMessage} Activity log failed: ${activityError.message}` : statusMessage, Boolean(registrationError || activityError));
       } finally {

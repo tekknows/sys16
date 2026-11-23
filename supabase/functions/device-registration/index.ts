@@ -19,7 +19,7 @@ function getServiceConfig() {
   return { supabaseUrl: supabaseUrl.replace(/\/$/, ''), serviceRoleKey, anonKey };
 }
 
-async function authorizeSupportStaff(request: Request, config: ReturnType<typeof getServiceConfig>) {
+async function authorizeAdministrator(request: Request, config: ReturnType<typeof getServiceConfig>) {
   const authorization = request.headers.get('Authorization');
   if (!authorization?.startsWith('Bearer ')) return null;
   const userResponse = await fetch(`${config.supabaseUrl}/auth/v1/user`, {
@@ -38,7 +38,7 @@ async function authorizeSupportStaff(request: Request, config: ReturnType<typeof
   );
   if (!roleResponse.ok) throw new Error('Could not verify the administrator role.');
   const roles = await roleResponse.json();
-  return roles.some((role: { role_name: string }) => role.role_name === 'Administrator' || role.role_name === 'IT Staff')
+  return roles.some((role: { role_name: string }) => role.role_name === 'Administrator')
     ? user
     : null;
 }
@@ -69,8 +69,8 @@ Deno.serve(async (request) => {
 
   try {
     const config = getServiceConfig();
-    const user = await authorizeSupportStaff(request, config);
-    if (!user) return jsonResponse({ error: 'Administrator or IT staff access is required.' }, 403);
+    const user = await authorizeAdministrator(request, config);
+    if (!user) return jsonResponse({ error: 'Administrator access is required.' }, 403);
     const body = await request.json();
     const laptopId = String(body.laptop_id || '');
     if (!/^[\da-f-]{36}$/i.test(laptopId)) return jsonResponse({ error: 'A valid laptop ID is required.' }, 400);

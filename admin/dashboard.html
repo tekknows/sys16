@@ -78,7 +78,7 @@
           <div class="content-grid two-col">
             <div class="panel-card">
               <div class="card-header">
-                <h3>Website usage</h3>
+                <h3>Website Usage Trend</h3>
                 <span class="pill success">Live</span>
               </div>
               <div class="bar-chart" id="usageChart"></div>
@@ -376,7 +376,7 @@
                   <th>Work session</th>
                   <th>Email</th>
                   <th>Account status</th>
-                  <th>Edit</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="employeeTable"></tbody>
@@ -543,10 +543,10 @@
                 <div class="panel-card">
                   <h3>Account settings</h3>
                   <form class="form-grid compact" id="changePasswordForm">
-                    <label><span>Administrator email</span><input type="email" autocomplete="email" required /></label>
-                    <label><span>Current password</span><span class="password-input"><input type="password" autocomplete="current-password" required /><button type="button" class="eye-toggle" aria-label="Show current password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
-                    <label><span>New password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show new password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
-                    <label><span>Confirm password</span><span class="password-input"><input type="password" autocomplete="new-password" /><button type="button" class="eye-toggle" aria-label="Show confirm password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <label><span>Administrator email</span><input name="email" type="email" autocomplete="email" required /></label>
+                    <label><span>Current password</span><span class="password-input"><input name="currentPassword" type="password" autocomplete="current-password" required /><button type="button" class="eye-toggle" aria-label="Show current password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <label><span>New password</span><span class="password-input"><input name="newPassword" type="password" autocomplete="new-password" minlength="8" /><button type="button" class="eye-toggle" aria-label="Show new password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
+                    <label><span>Confirm password</span><span class="password-input"><input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" /><button type="button" class="eye-toggle" aria-label="Show confirm password" aria-pressed="false"><svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></span></label>
                     <div class="span-2 actions-row"><button type="submit" class="primary-btn">Save changes</button><button type="reset" class="secondary-btn">Cancel</button></div>
                     <p class="span-2 form-state hidden" id="accountFormState" role="status"></p>
                   </form>
@@ -568,8 +568,8 @@
                     <thead><tr><th>Role</th><th>Access</th><th>Scope</th></tr></thead>
                     <tbody id="roleTable">
                       <tr><td>Administrator</td><td>Full access</td><td>All modules</td></tr>
-                      <tr><td>IT Staff</td><td>Tickets and device visibility</td><td>Assigned scope</td></tr>
-                      <tr><td>Employee</td><td>Personal extension</td><td>Own records</td></tr>
+                      <tr><td>IT Staff</td><td>Blocking, schedules, assignments, and tickets; read-only employees and laptops</td><td>Operational access</td></tr>
+                      <tr><td>Employee</td><td>Extension only; no Admin Dashboard access</td><td>Own records</td></tr>
                     </tbody>
                   </table>
                   <h3 class="subsection-title">User role assignments</h3>
@@ -585,6 +585,13 @@
               <div class="tab-panel" id="theme">
                 <div class="panel-card">
                   <h3>Theme settings</h3>
+                  <div id="itThemeControls" class="hidden">
+                    <p class="panel-subtitle">Choose the dashboard appearance for this browser.</p>
+                    <div class="actions-row">
+                      <button type="button" class="secondary-btn" data-theme-choice="light">Light mode</button>
+                      <button type="button" class="secondary-btn" data-theme-choice="dark">Dark mode</button>
+                    </div>
+                  </div>
                   <label><span>Dashboard accent color</span><input type="color" value="#2563eb" id="accentColor" /></label>
                   <div class="preview-box" id="accentPreview">Accent preview</div>
                   <div class="actions-row"><button type="button" class="primary-btn" id="saveThemeSettingsBtn">Save theme settings</button></div>
