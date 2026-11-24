@@ -163,8 +163,13 @@
               <div id="analyticsWebsiteData" class="analytics-horizontal-bars"></div>
             </article>
             <article class="panel-card analytics-visual-card">
-              <h3>Website Usage by Employee</h3>
-              <p class="panel-subtitle">Website visits per connected employee.</p>
+              <div class="card-header">
+                <div>
+                  <h3>Website Usage by Employee</h3>
+                  <p class="panel-subtitle">Website visits per connected employee.</p>
+                </div>
+                <label class="analytics-employee-filter"><span>Employee</span><select id="analyticsEmployeeFilter"><option value="">All employees</option></select></label>
+              </div>
               <div id="analyticsEmployeeUsage" class="analytics-horizontal-bars"></div>
             </article>
             <article class="panel-card analytics-visual-card">
@@ -172,19 +177,6 @@
               <p class="panel-subtitle">Current status; Offline reflects laptop connectivity, not clock-out.</p>
               <div id="analyticsEmployeeStatus" class="analytics-donut-wrap"></div>
             </article>
-          </div>
-          <div class="panel-card">
-            <div class="card-header">
-              <div><h3>Website usage by employee</h3><p class="panel-subtitle">Employee-level totals for the selected date range.</p></div>
-              <label class="analytics-employee-filter"><span>Employee</span><select id="analyticsEmployeeFilter"><option value="">All employees</option></select></label>
-            </div>
-            <p class="panel-subtitle">Only employees with an active registered laptop connection are listed. Select an employee or All connected employees to filter the results. MB uses browser-reported resource sizes and may be inaccurate for cached or cross-origin resources.</p>
-            <div class="table-scroll">
-              <table>
-                <thead><tr><th>User ID</th><th>Time spent</th><th>Data usage</th><th>Visits</th></tr></thead>
-                <tbody id="analyticsWebsiteTable"></tbody>
-              </table>
-            </div>
           </div>
         </section>
 

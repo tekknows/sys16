@@ -261,11 +261,40 @@ function isSupabaseConfigured() {
   return Boolean(config?.supabaseUrl && config?.supabaseAnonKey && window.supabase?.createClient);
 }
 
+function createSupabaseFetch() {
+  return async (url, options = {}) => {
+    const method = String(options.method || 'GET').toUpperCase();
+    const retryableMethod = method === 'GET' || method === 'HEAD';
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        window.clearTimeout(timeout);
+        if (retryableMethod && [502, 503, 504].includes(response.status) && attempt < 2) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+          continue;
+        }
+        return response;
+      } catch (error) {
+        window.clearTimeout(timeout);
+        lastError = error;
+        if (!retryableMethod || attempt >= 2) throw error;
+        await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+    throw lastError;
+  };
+}
+
 function getSupabaseClient() {
   if (!isSupabaseConfigured()) return null;
   if (!supabaseClient) {
     const config = window.LOCTIV_CONFIG;
-    supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
+      global: { fetch: createSupabaseFetch() },
+    });
   }
   return supabaseClient;
 }
@@ -661,40 +690,6 @@ function renderAnalyticsEmployeeFilter() {
   else select.value = '';
   renderAnalyticsData(analyticsRecords);
   renderBarChart();
-}
-
-function renderAnalyticsWebsiteTable(records) {
-  const table = document.getElementById('analyticsWebsiteTable');
-  if (!table) return;
-  const employees = new Map(getConnectedRegisteredEmployees().map((employee) => [employee.id, employee]));
-  const totals = new Map();
-  records.forEach((row) => {
-    const employeeId = row.employee_id || row.profile_id || '';
-    const employee = employees.get(employeeId);
-    if (!employee) return;
-    const key = employeeId;
-    const total = totals.get(key) || {
-      employeeId,
-      employeeName: employee.name || 'Unknown employee',
-      employeeUserId: employee.user_id,
-      seconds: 0,
-      bytes: 0,
-      visits: 0,
-    };
-    total.seconds += Number(row.total_seconds) || 0;
-    total.bytes += Number(row.bytes_used) || 0;
-    total.visits += Number(row.visit_count) || 0;
-    totals.set(key, total);
-  });
-  table.innerHTML = [...totals.values()]
-    .sort((a, b) => b.seconds - a.seconds || b.bytes - a.bytes)
-    .map((row) => `<tr>
-      <td><span class="analytics-employee-label">${escapeHtml(row.employeeUserId)}<small>${escapeHtml(row.employeeName)}</small></span></td>
-      <td>${formatUsageDuration(row.seconds)}</td>
-      <td>${(row.bytes / (1024 * 1024)).toFixed(2)} MB</td>
-      <td>${row.visits}</td>
-    </tr>`)
-    .join('') || '<tr><td colspan="4">No usage records for connected employees with registered laptops in this selection.</td></tr>';
 }
 
 function getConnectedRegisteredEmployees() {
@@ -2216,7 +2211,6 @@ function renderAnalyticsData(records) {
   ].map((item) => `<article class="stat-card"><span class="metric-label">${item.label}</span><strong class="metric-value">${item.value}</strong><span class="metric-trend positive">${item.trend}</span></article>`).join('');
   document.getElementById('analyticsChartSubtitle').textContent =
     `Website time grouped ${document.getElementById('analyticsTrendPeriod')?.value || 'daily'} using Philippine time (Asia/Manila).`;
-  renderAnalyticsWebsiteTable(visibleRecords);
   renderAnalyticsVisualizations(visibleRecords, dateRange);
   state.textContent = visibleRecords.length
     ? ''
