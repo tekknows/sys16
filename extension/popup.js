@@ -981,7 +981,7 @@ async function showEmployeeApp() {
     state.classList.add('error-text');
   }
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
-  ticketRefreshTimer = setInterval(refreshEmployeeApp, 30000);
+  ticketRefreshTimer = setInterval(refreshEmployeeApp, 15000);
 }
 
 async function refreshEmployeeApp() {

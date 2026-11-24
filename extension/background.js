@@ -711,12 +711,14 @@ async function syncBlockingRules(sessionOverride = null) {
     const rules = await chrome.declarativeNetRequest.getDynamicRules();
     const managedRules = rules.filter((rule) => rule.id >= blockRuleIdStart && rule.id < blockRuleIdStart + 100);
     const removedDomains = managedRules.flatMap((rule) => rule.condition?.requestDomains || []);
+    const cachedDomains = (cached['loctiv-blocking-policies'] || []).flatMap((rule) => [rule.domain]);
+    const domainsToReload = [...new Set([...removedDomains, ...cachedDomains].map(normalizeDomain).filter(Boolean))];
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: managedRules.map((rule) => rule.id),
       addRules: [],
     });
     await chrome.storage.local.set({ 'loctiv-blocking-policies': [] });
-    await reloadTabsForDomains(removedDomains);
+    await reloadTabsForDomains(domainsToReload);
     return {
       domains: [],
       installedRuleCount: 0,

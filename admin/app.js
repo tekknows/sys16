@@ -1211,7 +1211,10 @@ async function loadDashboardData() {
       ...template,
       websites: websitesByTemplate.get(template.id) || [],
     }));
-    await loadTicketCategories(client);
+    await loadTicketCategories(client).catch((error) => {
+      ticketCategories = [];
+      showToast(error.message, true);
+    });
     const [employeeResult, profileResult, roleResult, , assignmentResult, logResult, notificationResult, registrationResult, historyResult, settingResult] = results;
     systemSettings = Object.fromEntries((settingResult.data || []).map((row) => [row.setting_key, row.setting_value]));
     const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
@@ -2253,9 +2256,30 @@ function setupMonitoringRealtime() {
   if (!supabaseClient || monitoringRealtimeChannel) return;
   monitoringRealtimeChannel = supabaseClient
     .channel('admin-device-monitoring')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'laptops' }, scheduleDeviceMonitoringRefresh)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_registrations' }, scheduleDeviceMonitoringRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'laptops' }, () => {
+      scheduleDeviceMonitoringRefresh();
+      loadDashboardData().catch((error) => showToast(`Dashboard refresh failed: ${error.message}`, true));
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'device_registrations' }, () => {
+      scheduleDeviceMonitoringRefresh();
+      loadDashboardData().catch((error) => showToast(`Dashboard refresh failed: ${error.message}`, true));
+    })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'device_connection_logs' }, scheduleDeviceMonitoringRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, () => {
+      scheduleDeviceMonitoringRefresh();
+      loadDashboardData().catch((error) => showToast(`Employee status refresh failed: ${error.message}`, true));
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_sessions' }, () => {
+      scheduleDeviceMonitoringRefresh();
+      loadDashboardData().catch((error) => showToast(`Work-session refresh failed: ${error.message}`, true));
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'laptop_assignments' }, () => {
+      scheduleDeviceMonitoringRefresh();
+      loadDashboardData().catch((error) => showToast(`Assignment refresh failed: ${error.message}`, true));
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'website_blocking_rules' }, scheduleDeviceMonitoringRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'blocking_schedules' }, scheduleDeviceMonitoringRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'blocking_schedule_assignments' }, scheduleDeviceMonitoringRefresh)
     .subscribe();
 }
 
