@@ -1,16 +1,35 @@
 importScripts('config.js');
 
 const blockRuleIdStart = 1001;
-const extensionSessionKey = 'mindlock-extension-session';
-const policySyncAlarm = 'mindlock-policy-sync';
+const extensionSessionKey = 'loctiv-extension-session';
+const policySyncAlarm = 'loctiv-policy-sync';
 const policySyncPeriodMinutes = 0.5;
-const usageSyncAlarm = 'mindlock-usage-sync';
+const usageSyncAlarm = 'loctiv-usage-sync';
 const usageSyncPeriodMinutes = 0.5;
-const heartbeatAlarm = 'mindlock-extension-heartbeat';
+const heartbeatAlarm = 'loctiv-extension-heartbeat';
 const heartbeatPeriodMinutes = 0.5;
-const heartbeatStatusKey = 'mindlock-extension-heartbeat-status';
-const usageTrackingStorageKey = 'mindlock-website-usage-tracking';
-const workSessionStorageKey = 'mindlock-work-session';
+const heartbeatStatusKey = 'loctiv-extension-heartbeat-status';
+const usageTrackingStorageKey = 'loctiv-website-usage-tracking';
+const workSessionStorageKey = 'loctiv-work-session';
+const notifiedRepliesKey = 'loctiv-notified-replies';
+const notifiedStatusesKey = 'loctiv-notified-ticket-statuses';
+const ticketCheckAlarm = 'loctiv-ticket-reply-check';
+const legacyStorageKeys = {
+  [extensionSessionKey]: 'mindlock-extension-session',
+  [heartbeatStatusKey]: 'mindlock-extension-heartbeat-status',
+  [usageTrackingStorageKey]: 'mindlock-website-usage-tracking',
+  [workSessionStorageKey]: 'mindlock-work-session',
+  'loctiv-extension-theme': 'mindlock-extension-theme',
+  'loctiv-blocking-policies': 'mindlock-blocking-policies',
+  [notifiedRepliesKey]: 'mindlock-notified-replies',
+  [notifiedStatusesKey]: 'mindlock-notified-ticket-statuses',
+};
+const legacyAlarmNames = [
+  'mindlock-policy-sync',
+  'mindlock-usage-sync',
+  'mindlock-extension-heartbeat',
+  'mindlock-ticket-reply-check',
+];
 const activeUsage = new Map();
 let nextUsageEntryId = 0;
 let usageStateLoaded = false;
@@ -21,6 +40,20 @@ let heartbeatInProgress = false;
 let authorizedWorkSession = false;
 let serverWorkSessionActive = false;
 let activeAttendanceContext = null;
+
+async function migrateLegacyExtensionState() {
+  const legacyKeys = Object.values(legacyStorageKeys);
+  const stored = await chrome.storage.local.get([...legacyKeys, ...Object.keys(legacyStorageKeys)]);
+  const migrated = {};
+  Object.entries(legacyStorageKeys).forEach(([currentKey, legacyKey]) => {
+    if (stored[currentKey] === undefined && stored[legacyKey] !== undefined) {
+      migrated[currentKey] = stored[legacyKey];
+    }
+  });
+  if (Object.keys(migrated).length) await chrome.storage.local.set(migrated);
+  await chrome.storage.local.remove(legacyKeys);
+  await Promise.all(legacyAlarmNames.map((name) => chrome.alarms.clear(name)));
+}
 
 function isScheduleActive(rule, now = new Date()) {
   const timezone = rule.timezone || 'Asia/Manila';
@@ -117,7 +150,7 @@ async function flushWebsiteUsage() {
   await ensureUsageStateLoaded();
   const session = await getValidExtensionSession();
   if (!session?.access_token) return;
-  const config = globalThis.MINDLOCK_CONFIG;
+  const config = globalThis.LOCTIV_CONFIG;
   const now = Date.now();
   const headers = {
     apikey: config.supabaseAnonKey,
@@ -244,7 +277,7 @@ async function syncAuthoritativeWorkSession() {
     return false;
   }
 
-  const config = globalThis.MINDLOCK_CONFIG;
+  const config = globalThis.LOCTIV_CONFIG;
   const headers = {
     apikey: config.supabaseAnonKey,
     Authorization: `Bearer ${session.access_token}`,
@@ -525,7 +558,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function loadBlockingSchedules(session) {
-  const config = globalThis.MINDLOCK_CONFIG;
+  const config = globalThis.LOCTIV_CONFIG;
   if (!session?.access_token) {
     throw new Error('The employee session does not contain an access token.');
   }
@@ -671,7 +704,7 @@ async function loadBlockingSchedules(session) {
 }
 
 async function syncBlockingRules(sessionOverride = null) {
-  const cached = await chrome.storage.local.get(['mindlock-blocking-policies']);
+  const cached = await chrome.storage.local.get(['loctiv-blocking-policies']);
   const session = sessionOverride || await getValidExtensionSession();
   const workSessionAuthorized = await isAuthorizedWorkSession();
   if (!workSessionAuthorized) {
@@ -682,7 +715,7 @@ async function syncBlockingRules(sessionOverride = null) {
       removeRuleIds: managedRules.map((rule) => rule.id),
       addRules: [],
     });
-    await chrome.storage.local.set({ 'mindlock-blocking-policies': [] });
+    await chrome.storage.local.set({ 'loctiv-blocking-policies': [] });
     await reloadTabsForDomains(removedDomains);
     return {
       domains: [],
@@ -695,9 +728,9 @@ async function syncBlockingRules(sessionOverride = null) {
   if (session) {
     try {
       schedules = await loadBlockingSchedules(session);
-      await chrome.storage.local.set({ 'mindlock-blocking-policies': schedules });
+      await chrome.storage.local.set({ 'loctiv-blocking-policies': schedules });
     } catch (error) {
-      schedules = cached['mindlock-blocking-policies'] || [];
+      schedules = cached['loctiv-blocking-policies'] || [];
       if (!schedules.length) throw new Error(`Could not synchronize website policies: ${error.message || error}`);
       console.warn('[LOCTIV BLOCKING] Using cached website blocking policies after synchronization failure:', error);
     }
@@ -785,30 +818,33 @@ async function syncBlockingRules(sessionOverride = null) {
   };
 }
 
-const notifiedRepliesKey = 'mindlock-notified-replies';
-const notifiedStatusesKey = 'mindlock-notified-ticket-statuses';
-const ticketCheckAlarm = 'mindlock-ticket-reply-check';
+async function initializeExtensionRuntime() {
+  await migrateLegacyExtensionState();
+  chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
+  chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
+  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: usageSyncPeriodMinutes });
+  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
+  try {
+    await syncBlockingRules();
+  } catch (error) {
+    console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error);
+  }
+  try {
+    await trackActiveTabs();
+  } catch (error) {
+    console.error('[LOCTIV ANALYTICS] Could not initialize active tab tracking:', error);
+  }
+  sendExtensionHeartbeat();
+}
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
-  chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
-  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: usageSyncPeriodMinutes });
-  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
-  trackActiveTabs()
-    .catch((error) => console.error('[LOCTIV ANALYTICS] Could not initialize active tab tracking:', error));
-  sendExtensionHeartbeat();
+  initializeExtensionRuntime().catch((error) => console.error('[LOCTIV] Could not initialize extension services:', error));
 });
 chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create(ticketCheckAlarm, { periodInMinutes: 1 });
-  chrome.alarms.create(policySyncAlarm, { periodInMinutes: policySyncPeriodMinutes });
-  chrome.alarms.create(usageSyncAlarm, { periodInMinutes: usageSyncPeriodMinutes });
-  chrome.alarms.create(heartbeatAlarm, { periodInMinutes: heartbeatPeriodMinutes });
-  initializeUsageAfterBrowserStart()
-    .catch((error) => console.error('[LOCTIV ANALYTICS] Could not restore browser usage tracking:', error));
-  sendExtensionHeartbeat();
+  initializeExtensionRuntime()
+    .then(() => initializeUsageAfterBrowserStart())
+    .catch((error) => console.error('[LOCTIV] Could not initialize extension services:', error));
 });
-chrome.runtime.onInstalled.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
-chrome.runtime.onStartup.addListener(() => syncBlockingRules().catch((error) => console.error('[LOCTIV BLOCKING] Unable to apply website blocking rules:', error)));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[workSessionStorageKey]) {
     isAuthorizedWorkSession()
@@ -889,7 +925,7 @@ async function sendExtensionHeartbeat() {
       return;
     }
 
-    const config = globalThis.MINDLOCK_CONFIG;
+    const config = globalThis.LOCTIV_CONFIG;
     const headers = {
       apikey: config.supabaseAnonKey,
       Authorization: `Bearer ${session.access_token}`,
@@ -999,11 +1035,11 @@ async function getValidExtensionSession() {
     hasAccessToken: Boolean(session?.access_token),
     hasUserId: Boolean(session?.user?.id),
   });
-  if (!session || !globalThis.MINDLOCK_CONFIG?.supabaseUrl || !globalThis.MINDLOCK_CONFIG?.supabaseAnonKey) return null;
+  if (!session || !globalThis.LOCTIV_CONFIG?.supabaseUrl || !globalThis.LOCTIV_CONFIG?.supabaseAnonKey) return null;
   if (session.expires_at * 1000 <= Date.now() + 60000) {
-    const response = await fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=refresh_token`, {
+    const response = await fetch(`${globalThis.LOCTIV_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=refresh_token`, {
       method: 'POST',
-      headers: { apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey, 'Content-Type': 'application/json' },
+      headers: { apikey: globalThis.LOCTIV_CONFIG.supabaseAnonKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: session.refresh_token }),
     });
     if (!response.ok) return null;
@@ -1018,9 +1054,9 @@ async function checkForTicketReplies() {
   try {
     const session = await getValidExtensionSession();
     if (!session) return;
-    const restUrl = `${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1`;
+    const restUrl = `${globalThis.LOCTIV_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1`;
     const headers = {
-      apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
+      apikey: globalThis.LOCTIV_CONFIG.supabaseAnonKey,
       Authorization: `Bearer ${session.access_token}`,
     };
     const ticketResponse = await fetch(`${restUrl}/tickets?profile_id=eq.${encodeURIComponent(session.user.id)}&select=id,ticket_number,status&order=updated_at.desc&limit=50`, {
@@ -1043,7 +1079,7 @@ async function checkForTicketReplies() {
     const notified = new Set(stored[notifiedRepliesKey] || []);
     const newReplies = unreadReplies.filter((reply) => !notified.has(reply.id));
     for (const reply of newReplies) {
-      chrome.notifications.create(`mindlock-reply-${reply.id}`, {
+      chrome.notifications.create(`loctiv-reply:${reply.ticket_id}:${reply.id}`, {
         type: 'basic',
         iconUrl: chrome.runtime.getURL('icons/icon128.png'),
         title: 'New LOCTIV support reply',
@@ -1057,7 +1093,7 @@ async function checkForTicketReplies() {
     const knownStatuses = statusStorage[notifiedStatusesKey] || {};
     for (const ticket of tickets) {
       if (knownStatuses[ticket.id] && knownStatuses[ticket.id] !== ticket.status) {
-        chrome.notifications.create(`mindlock-status-${ticket.id}`, {
+        chrome.notifications.create(`loctiv-status:${ticket.id}`, {
           type: 'basic',
           iconUrl: chrome.runtime.getURL('icons/icon128.png'),
           title: 'Ticket status updated',
@@ -1071,3 +1107,15 @@ async function checkForTicketReplies() {
     console.error('Unable to check for ticket replies:', error);
   }
 }
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  const ticketId = notificationId.match(/^loctiv-(?:reply|status):([0-9a-f-]{36})(?::|$)/i)?.[1];
+  if (!ticketId) return;
+  const url = `${chrome.runtime.getURL('popup.html')}?ticketId=${encodeURIComponent(ticketId)}`;
+  chrome.tabs.create({ url }, () => {
+    if (chrome.runtime.lastError) {
+      console.error('[LOCTIV TICKETS] Could not open the ticket from its notification:', chrome.runtime.lastError.message);
+    }
+  });
+  chrome.notifications.clear(notificationId);
+});

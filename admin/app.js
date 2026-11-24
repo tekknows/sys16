@@ -1,5 +1,6 @@
-const STORAGE_KEYS = { settings: 'mindlock-admin-settings' };
-const UPDATE_LOGS_DISMISSAL_KEY = 'mindlock-update-logs-dismissed-1.2.2';
+const STORAGE_KEYS = { settings: 'loctiv-admin-settings' };
+const LEGACY_STORAGE_KEYS = { settings: 'mindlock-admin-settings', rememberedAdmin: 'mindlock-remember-admin' };
+const UPDATE_LOGS_DISMISSAL_KEY = 'loctiv-update-logs-dismissed-1.2.5';
 const PHILIPPINES_TIMEZONE = 'Asia/Manila';
 const PHILIPPINES_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -256,14 +257,14 @@ function updatePhilippinesClock() {
 }
 
 function isSupabaseConfigured() {
-  const config = window.MINDLOCK_CONFIG;
+  const config = window.LOCTIV_CONFIG;
   return Boolean(config?.supabaseUrl && config?.supabaseAnonKey && window.supabase?.createClient);
 }
 
 function getSupabaseClient() {
   if (!isSupabaseConfigured()) return null;
   if (!supabaseClient) {
-    const config = window.MINDLOCK_CONFIG;
+    const config = window.LOCTIV_CONFIG;
     supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
   }
   return supabaseClient;
@@ -275,7 +276,7 @@ async function invokeSupabaseFunction(functionName, payload) {
   const { data: sessionData, error: sessionError } = await client.auth.getSession();
   if (sessionError) throw sessionError;
   if (!sessionData.session?.access_token) throw new Error('Your admin session has expired. Sign in again.');
-  const config = window.MINDLOCK_CONFIG;
+  const config = window.LOCTIV_CONFIG;
   let response;
   try {
     response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/functions/v1/${functionName}`, {
@@ -309,7 +310,11 @@ async function invokeSupabaseFunction(functionName, payload) {
 
 function readState() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.settings);
+    const saved = localStorage.getItem(STORAGE_KEYS.settings) || localStorage.getItem(LEGACY_STORAGE_KEYS.settings);
+    if (saved && !localStorage.getItem(STORAGE_KEYS.settings)) {
+      localStorage.setItem(STORAGE_KEYS.settings, saved);
+      localStorage.removeItem(LEGACY_STORAGE_KEYS.settings);
+    }
     return saved ? JSON.parse(saved) : { theme: 'light', accent: '#2563eb', incognitoEnabled: false };
   } catch (error) {
     return { theme: 'light', accent: '#2563eb', incognitoEnabled: false };
@@ -332,6 +337,7 @@ async function refreshSelectedTicket() {
 
 function saveState(nextState) {
   localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(nextState));
+  localStorage.removeItem(LEGACY_STORAGE_KEYS.settings);
 }
 
 function getSystemSetting(key, fallback) {
@@ -433,10 +439,11 @@ async function handleLogin(ev) {
 
   const remember = document.getElementById('remember')?.checked;
   if (remember) {
-    localStorage.setItem('mindlock-remember-admin', email.trim().toLowerCase());
+    localStorage.setItem('loctiv-remember-admin', email.trim().toLowerCase());
   } else {
-    localStorage.removeItem('mindlock-remember-admin');
+    localStorage.removeItem('loctiv-remember-admin');
   }
+  localStorage.removeItem(LEGACY_STORAGE_KEYS.rememberedAdmin);
 
   window.location.href = 'dashboard.html';
 }
@@ -444,7 +451,12 @@ async function handleLogin(ev) {
 function setupLoginPage() {
   const loginForm = document.getElementById('loginForm');
   const togglePassword = document.getElementById('togglePassword');
-  const rememberedEmail = localStorage.getItem('mindlock-remember-admin');
+  const rememberedEmail = localStorage.getItem('loctiv-remember-admin')
+    || localStorage.getItem(LEGACY_STORAGE_KEYS.rememberedAdmin);
+  if (rememberedEmail && !localStorage.getItem('loctiv-remember-admin')) {
+    localStorage.setItem('loctiv-remember-admin', rememberedEmail);
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.rememberedAdmin);
+  }
   const themeState = readState();
   applyTheme(themeState.theme, null);
   if (new URLSearchParams(window.location.search).get('access') === 'denied') {
@@ -623,6 +635,13 @@ function formatUsageDuration(seconds) {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function formatDataUsage(bytes) {
+  const totalBytes = Math.max(0, Number(bytes) || 0);
+  if (totalBytes >= 1024 * 1024) return `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (totalBytes >= 1024) return `${(totalBytes / 1024).toFixed(1)} KB`;
+  return `${Math.round(totalBytes)} B`;
 }
 
 function getSelectedAnalyticsRecords(records) {
@@ -969,7 +988,6 @@ function renderLaptopTable() {
         <td>${escapeHtml(assignment?.employee.name || 'Unassigned')}</td>
         <td>${escapeHtml(assignment?.employee.user_id || '—')}</td>
         <td>${escapeHtml(row.mac_address || registration?.mac_address || '—')}</td>
-        <td>${escapeHtml(registration?.registration_id || '—')}</td>
         <td>${statusPill(getDeviceConnectionStatus(registration))}</td>
         <td>${statusPill(registration ? 'Registered' : 'Unregistered')}</td>
         <td>${escapeHtml(formatDate(registration ? registration.last_heartbeat_at : row.last_seen_at))}</td>
@@ -983,7 +1001,7 @@ function renderLaptopTable() {
           ` : ''}
         </td>
       </tr>`;
-    }).join('') || '<tr><td colspan="10">No laptops registered.</td></tr>';
+    }).join('') || '<tr><td colspan="9">No laptops registered.</td></tr>';
 }
 
 let dashboardToastTimer = null;
@@ -2037,8 +2055,8 @@ function renderAnalyticsTrendChart(target, buckets) {
     const y = top + plotHeight - barHeight;
     const labelY = barHeight ? Math.max(14, y - 9) : top - 8;
     const showValue = index % step === 0 || index === buckets.length - 1;
-    return `<rect x="${x}" y="${top}" width="${barWidth}" height="${plotHeight}" rx="${barWidth / 2}" class="analytics-trend-track"/>
-      ${barHeight ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="${Math.min(barWidth / 2, barHeight / 2)}" class="analytics-trend-bar"/>` : ''}
+    return `<rect x="${x}" y="${top}" width="${barWidth}" height="${plotHeight}" rx="10" class="analytics-trend-track"/>
+      ${barHeight ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="10" class="analytics-trend-bar"/>` : ''}
       ${showValue ? `<text x="${x + barWidth / 2}" y="${labelY}" text-anchor="middle" class="analytics-trend-value">${bucket.hours.toFixed(1)} h</text>` : ''}
       <title>${escapeHtml(bucket.label)}: ${bucket.hours.toFixed(1)} hours</title>`;
   }).join('');
@@ -2048,8 +2066,8 @@ function renderAnalyticsTrendChart(target, buckets) {
   target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Website time usage grouped by ${escapeHtml(document.getElementById('analyticsTrendPeriod')?.value || 'day')}, in hours">
     <defs>
       <linearGradient id="analyticsTrendFill" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#4ca878"/>
-        <stop offset="100%" stop-color="#829cf1"/>
+        <stop offset="0%" class="analytics-trend-gradient-start"/>
+        <stop offset="100%" class="analytics-trend-gradient-end"/>
       </linearGradient>
     </defs>
     ${bars}${labels}
@@ -2107,17 +2125,22 @@ function renderAnalyticsVisualizations(records, dateRange) {
 
   const visitsBySite = new Map();
   const secondsBySite = new Map();
+  const dataBySite = new Map();
   records.forEach((row) => {
     const domain = row.domain || 'Unknown website';
     visitsBySite.set(domain, (visitsBySite.get(domain) || 0) + (Number(row.visit_count) || 0));
     secondsBySite.set(domain, (secondsBySite.get(domain) || 0) + (Number(row.total_seconds) || 0));
+    dataBySite.set(domain, (dataBySite.get(domain) || 0) + (Number(row.bytes_used) || 0));
   });
   const topSites = [...visitsBySite.entries()].map(([label, value]) => ({ label, value }))
     .sort((a, b) => b.value - a.value).slice(0, 8);
   const topTime = [...secondsBySite.entries()].map(([label, value]) => ({ label, value }))
     .sort((a, b) => b.value - a.value).slice(0, 8);
+  const topDataUsage = [...dataBySite.entries()].map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value).slice(0, 8);
   renderAnalyticsHorizontalBars(document.getElementById('analyticsTopSites'), topSites, (value) => `${value} visits`);
   renderAnalyticsHorizontalBars(document.getElementById('analyticsWebsiteTime'), topTime, formatUsageDuration);
+  renderAnalyticsHorizontalBars(document.getElementById('analyticsWebsiteData'), topDataUsage, formatDataUsage);
 
   const employees = new Map(getConnectedRegisteredEmployees().map((employee) => [employee.id, employee]));
   const visitsByEmployee = new Map();
@@ -2145,12 +2168,12 @@ function renderAnalyticsVisualizations(records, dateRange) {
   }
 
   const statusColors = {
-    Working: '#4B87B3',
-    'Lunch Break': '#D6A84F',
-    Overtime: '#7866A8',
-    'Extended Session': '#C45A5A',
-    'Clocked Out': '#9CAFC0',
-    Offline: '#1B2A38',
+    Working: 'var(--analytics-status-working)',
+    'Lunch Break': 'var(--analytics-status-lunch)',
+    Overtime: 'var(--analytics-status-overtime)',
+    'Extended Session': 'var(--analytics-status-extended)',
+    'Clocked Out': 'var(--analytics-status-clocked-out)',
+    Offline: 'var(--analytics-status-offline)',
   };
   const statusRows = getAnalyticsEmployeeStatuses();
   const totalEmployees = statusRows.reduce((sum, [, count]) => sum + count, 0);
@@ -2498,7 +2521,8 @@ function setupDashboardInteractions() {
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
       getSupabaseClient()?.auth.signOut();
-      localStorage.removeItem('mindlock-remember-admin');
+      localStorage.removeItem('loctiv-remember-admin');
+      localStorage.removeItem(LEGACY_STORAGE_KEYS.rememberedAdmin);
       window.location.href = 'index.html';
     });
   }

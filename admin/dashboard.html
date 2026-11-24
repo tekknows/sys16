@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LOCTIV Admin Dashboard</title>
     <link rel="icon" href="logo.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=1.2.14" />
+    <link rel="stylesheet" href="styles.css?v=1.2.5" />
   </head>
   <body class="dashboard-page">
     <div class="app-shell">
@@ -36,7 +36,7 @@
         </nav>
 
         <div class="sidebar-meta">
-          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.2.2">v1.2.2</button>
+          <button class="version-label" id="versionButton" type="button" aria-label="Show update logs for version 1.2.5">v1.2.5</button>
           <button class="secondary-btn small-btn" id="logoutBtn">Logout</button>
         </div>
       </aside>
@@ -127,8 +127,8 @@
             <article class="panel-card analytics-visual-card analytics-trend-card">
               <div class="card-header">
                 <div>
-                  <h3>Website Usage Trend</h3>
-                  <p class="panel-subtitle" id="analyticsChartSubtitle">Website time grouped by day, Philippine time.</p>
+                  <h3>Website Time Spent</h3>
+                  <p class="panel-subtitle" id="analyticsChartSubtitle">Time spent grouped by day, Philippine time.</p>
                 </div>
                 <label class="analytics-period-filter"><span>Group by</span>
                   <select id="analyticsTrendPeriod" aria-label="Website trend grouping">
@@ -156,6 +156,11 @@
               <h3>Website Time Consumption</h3>
               <p class="panel-subtitle">Time spent per website in the selected date range.</p>
               <div id="analyticsWebsiteTime" class="analytics-horizontal-bars"></div>
+            </article>
+            <article class="panel-card analytics-visual-card">
+              <h3>Data Usage by Website</h3>
+              <p class="panel-subtitle">Browser-reported resource data per website in the selected date range.</p>
+              <div id="analyticsWebsiteData" class="analytics-horizontal-bars"></div>
             </article>
             <article class="panel-card analytics-visual-card">
               <h3>Website Usage by Employee</h3>
@@ -408,7 +413,6 @@
                   <th>Assigned employee</th>
                   <th>Employee ID</th>
                   <th>MAC address</th>
-                  <th>Device ID</th>
                   <th>Connection</th>
                   <th>Registration</th>
                   <th>Last seen</th>
@@ -672,7 +676,16 @@
       <section class="modal-card update-logs-modal-card">
         <div class="card-header"><div><p class="eyebrow">Current release</p><h2 id="updateLogsTitle">Update logs</h2></div><button class="icon-btn" data-close-modal aria-label="Close update logs">×</button></div>
         <div class="update-logs-content">
-         <div class="version-banner"><span>Version</span><strong>1.2.12</strong><time datetime="2026-11-19">November 19, 2026</time></div>
+         <div class="version-banner"><span>Version</span><strong>1.2.5</strong><time datetime="2026-11-24">November 24, 2026</time></div>
+         <h3>LOCTIV branding and employee ticket navigation</h3>
+         <p>Updates product branding and makes extension support updates easier to find and open.</p>
+         <ul>
+           <li>Use LOCTIV branding consistently across the admin dashboard and employee extension</li>
+           <li>Open the related ticket conversation when an employee clicks a ticket notification</li>
+           <li>Show the latest extension update with access to previous release notes</li>
+         </ul>
+         <hr />
+         <div class="version-banner"><span>Version</span><strong>1.2.2</strong><time datetime="2026-11-19">November 19, 2026</time></div>
          <h3>Ticket, schedule, and device workflows</h3>
          <p>Improves ticket navigation and closure, laptop enrollment, and website schedule organization.</p>
          <ul>
@@ -683,7 +696,7 @@
            <li>Remove the dashboard Needs attention card</li>
          </ul>
          <hr />
-         <div class="version-banner"><span>Version</span><strong>1.2.11</strong><time datetime="2026-11-18">November 18, 2026</time></div>
+         <div class="version-banner"><span>Version</span><strong>1.2.1</strong><time datetime="2026-11-18">November 18, 2026</time></div>
          <h3>Employee analytics and lunch-aware blocking</h3>
          <p>Adds employee-level website usage reporting and bulk work-hour schedules with a configurable lunch access window.</p>
          <ul>
@@ -827,7 +840,7 @@
     <div class="dashboard-toast" id="dashboardToast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js"></script>
-  <script src="app.js?v=1.2.14"></script>
+  <script src="config.js?v=1.2.5"></script>
+  <script src="app.js?v=1.2.5"></script>
   </body>
 </html>

@@ -9,6 +9,14 @@
   --border: #b7d3e8;
   --accent: #4b87b3;
   --accent-soft: rgba(75, 135, 179, 0.16);
+  --chart-gradient-start: var(--accent);
+  --chart-gradient-end: rgba(37, 99, 235, 0.5);
+  --analytics-status-working: color-mix(in srgb, #4b87b3 65%, var(--accent) 35%);
+  --analytics-status-lunch: color-mix(in srgb, #d6a84f 65%, var(--accent) 35%);
+  --analytics-status-overtime: color-mix(in srgb, #7866a8 65%, var(--accent) 35%);
+  --analytics-status-extended: color-mix(in srgb, #c45a5a 65%, var(--accent) 35%);
+  --analytics-status-clocked-out: color-mix(in srgb, #9cafc0 65%, var(--accent) 35%);
+  --analytics-status-offline: color-mix(in srgb, #1b2a38 65%, var(--accent) 35%);
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
@@ -984,7 +992,7 @@ textarea,
   max-width: 26px;
   min-height: 18px;
   border-radius: 10px 10px 0 0;
-  background: linear-gradient(180deg, var(--accent), rgba(37, 99, 235, 0.5));
+  background: linear-gradient(180deg, var(--chart-gradient-start), var(--chart-gradient-end));
 }
 
 .donut-legend {
@@ -1888,6 +1896,14 @@ th {
   fill: url(#analyticsTrendFill);
 }
 
+.analytics-trend-gradient-start {
+  stop-color: var(--chart-gradient-start);
+}
+
+.analytics-trend-gradient-end {
+  stop-color: var(--chart-gradient-end);
+}
+
 .analytics-horizontal-bars {
   display: grid;
   gap: 12px;
@@ -1922,7 +1938,7 @@ th {
   height: 100%;
   min-width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent), #1b2a38);
+  background: linear-gradient(90deg, var(--chart-gradient-start), var(--chart-gradient-end));
 }
 
 .analytics-horizontal-row strong {
@@ -1981,7 +1997,7 @@ th {
 }
 
 .analytics-donut-unavailable {
-  background: conic-gradient(#b7d3e8 0deg 360deg);
+  background: conic-gradient(var(--surface-muted) 0deg 360deg);
 }
 
 .analytics-donut-legend {
@@ -2010,11 +2026,11 @@ th {
 }
 
 .donut-swatch.allowed {
-  --donut-color: #4b87b3;
+  --donut-color: var(--accent);
 }
 
 .donut-swatch.unavailable {
-  --donut-color: #1b2a38;
+  --donut-color: var(--surface-muted);
 }
 
 .analytics-tab {

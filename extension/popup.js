@@ -1,4 +1,4 @@
-const EXTENSION_SESSION_KEY = 'mindlock-extension-session';
+const EXTENSION_SESSION_KEY = 'loctiv-extension-session';
 let extensionSession = null;
 let employeeProfile = null;
 let employeeRecord = null;
@@ -9,7 +9,19 @@ let ticketRefreshTimer = null;
 let ticketRealtimeTimer = null;
 let lastPolicySyncAt = null;
 let employeeTheme = 'light';
-const workSessionStorageKey = 'mindlock-work-session';
+const workSessionStorageKey = 'loctiv-work-session';
+const extensionThemeKey = 'loctiv-extension-theme';
+const heartbeatStatusKey = 'loctiv-extension-heartbeat-status';
+const legacyStorageKeys = {
+  [EXTENSION_SESSION_KEY]: 'mindlock-extension-session',
+  [workSessionStorageKey]: 'mindlock-work-session',
+  [extensionThemeKey]: 'mindlock-extension-theme',
+  [heartbeatStatusKey]: 'mindlock-extension-heartbeat-status',
+  'loctiv-website-usage-tracking': 'mindlock-website-usage-tracking',
+  'loctiv-blocking-policies': 'mindlock-blocking-policies',
+  'loctiv-notified-replies': 'mindlock-notified-replies',
+  'loctiv-notified-ticket-statuses': 'mindlock-notified-ticket-statuses',
+};
 let currentWorkSchedule = null;
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -29,11 +41,11 @@ function renderHeartbeatStatus(status) {
 
 function renderExtensionReleaseVersion() {
   const versionLabel = document.getElementById('extensionReleaseVersion');
-  if (versionLabel) versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
+  if (versionLabel) versionLabel.textContent = 'v1.2.5';
 }
 
 function isSupabaseConfigured() {
-  return Boolean(globalThis.MINDLOCK_CONFIG?.supabaseUrl && globalThis.MINDLOCK_CONFIG?.supabaseAnonKey);
+  return Boolean(globalThis.LOCTIV_CONFIG?.supabaseUrl && globalThis.LOCTIV_CONFIG?.supabaseAnonKey);
 }
 
 function extensionStorageGet(key) {
@@ -45,15 +57,32 @@ function extensionStorageSet(value) {
 }
 
 function extensionStorageRemove(key) {
-  return new Promise((resolve) => chrome.storage.local.remove(key, resolve));
+  return new Promise((resolve, reject) => chrome.storage.local.remove(key, () => {
+    const error = chrome.runtime.lastError;
+    if (error) reject(new Error(error.message));
+    else resolve();
+  }));
+}
+
+async function migrateLegacyExtensionStorage() {
+  const legacyKeys = Object.values(legacyStorageKeys);
+  const stored = await extensionStorageGet([...legacyKeys, ...Object.keys(legacyStorageKeys)]);
+  const migrated = {};
+  Object.entries(legacyStorageKeys).forEach(([currentKey, legacyKey]) => {
+    if (stored[currentKey] === undefined && stored[legacyKey] !== undefined) {
+      migrated[currentKey] = stored[legacyKey];
+    }
+  });
+  if (Object.keys(migrated).length) await extensionStorageSet(migrated);
+  await extensionStorageRemove(legacyKeys);
 }
 
 function apiUrl(path) {
-  return `${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/${path}`;
+  return `${globalThis.LOCTIV_CONFIG.supabaseUrl.replace(/\/$/, '')}/rest/v1/${path}`;
 }
 
 async function authRequest(path, body) {
-  const config = globalThis.MINDLOCK_CONFIG;
+  const config = globalThis.LOCTIV_CONFIG;
   const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/auth/v1/${path}`, {
     method: 'POST',
     headers: { apikey: config.supabaseAnonKey, 'Content-Type': 'application/json' },
@@ -67,7 +96,7 @@ async function authRequest(path, body) {
 async function restRequest(path, { method = 'GET', body, prefer, session = extensionSession } = {}) {
   if (!session?.access_token) throw new Error('Sign in to your company account first.');
   const headers = {
-    apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey,
+    apikey: globalThis.LOCTIV_CONFIG.supabaseAnonKey,
     Authorization: `Bearer ${session.access_token}`,
     'Content-Type': 'application/json',
   };
@@ -91,7 +120,7 @@ async function restRequest(path, { method = 'GET', body, prefer, session = exten
 
 async function storageRequest(path, { method = 'POST', file, session = extensionSession } = {}) {
   if (!session?.access_token) throw new Error('Sign in to upload attachments.');
-  const config = globalThis.MINDLOCK_CONFIG;
+  const config = globalThis.LOCTIV_CONFIG;
   const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/storage/v1/object/${path}`, {
     method,
     headers: {
@@ -127,26 +156,70 @@ async function ensureFreshSession() {
 
 async function signOut(updateUi = true) {
   if (extensionSession?.access_token && isSupabaseConfigured()) {
-    fetch(`${globalThis.MINDLOCK_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/logout`, {
+    fetch(`${globalThis.LOCTIV_CONFIG.supabaseUrl.replace(/\/$/, '')}/auth/v1/logout`, {
       method: 'POST',
-      headers: { apikey: globalThis.MINDLOCK_CONFIG.supabaseAnonKey, Authorization: `Bearer ${session.access_token}` },
-    }).catch(() => {});
+      headers: { apikey: globalThis.LOCTIV_CONFIG.supabaseAnonKey, Authorization: `Bearer ${session.access_token}` },
+    }).then((response) => {
+      if (!response.ok) console.warn(`[LOCTIV AUTH] Server sign-out failed with HTTP ${response.status}.`);
+    }).catch((error) => {
+      console.warn('[LOCTIV AUTH] Could not complete server sign-out:', error);
+    });
   }
   extensionSession = null;
   employeeProfile = null;
   employeeRecord = null;
   employeeRole = null;
   assignedDevice = null;
-  await extensionStorageRemove(EXTENSION_SESSION_KEY);
-  if (updateUi) showLogin();
+  activeTicket = null;
+  for (const timer of [ticketRefreshTimer, ticketRealtimeTimer]) {
+    if (timer) clearInterval(timer);
+  }
+  ticketRefreshTimer = null;
+  ticketRealtimeTimer = null;
+  document.getElementById('employeeTicketDetail').classList.add('hidden');
+  document.getElementById('myTicketsListCard').classList.remove('hidden');
+  document.getElementById('employeeTicketInfo').replaceChildren();
+  document.getElementById('employeeConversation').replaceChildren();
+  document.getElementById('employeeConversationState').textContent = '';
+  let storageError = null;
+  try {
+    await extensionStorageRemove(EXTENSION_SESSION_KEY);
+  } catch (error) {
+    storageError = error;
+    console.error('[LOCTIV AUTH] Could not clear the saved session after sign-out:', error);
+  }
+  if (updateUi) {
+    showLogin(storageError
+      ? 'Signed out in this window, but the saved session could not be cleared. Try signing out again.'
+      : '');
+  }
 }
 
 function showLogin(message = '') {
   document.getElementById('extensionLoginView').classList.remove('hidden');
   document.getElementById('extensionApp').classList.add('hidden');
   document.getElementById('extensionLoginState').textContent = message;
-  if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
-  if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
+  for (const timer of [ticketRefreshTimer, ticketRealtimeTimer]) {
+    if (timer) clearInterval(timer);
+  }
+  ticketRefreshTimer = null;
+  ticketRealtimeTimer = null;
+}
+
+async function handleExtensionSignOut(event) {
+  event.preventDefault();
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Signing out…';
+  try {
+    await signOut();
+  } catch (error) {
+    console.error('[LOCTIV AUTH] Could not complete sign-out:', error);
+    showLogin(`Could not sign out cleanly: ${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sign out';
+  }
 }
 
 function setExtensionTheme(theme) {
@@ -154,14 +227,14 @@ function setExtensionTheme(theme) {
   document.body.classList.toggle('dark-mode', theme === 'dark');
   document.getElementById('themeToggle').textContent = theme === 'dark' ? '☀' : '☾';
   document.getElementById('themeToggle').setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`);
-  chrome.storage.local.set({ 'mindlock-extension-theme': theme });
+  chrome.storage.local.set({ [extensionThemeKey]: theme });
 }
 
 async function loadCurrentEmployee() {
   const roles = await restRequest(`user_roles?profile_id=eq.${extensionSession.user.id}&revoked_at=is.null&select=role_name&limit=10`);
   employeeRole = ['Administrator', 'IT Staff', 'Employee']
     .find((role) => roles.some((row) => row.role_name === role));
-  if (!employeeRole) throw new Error('This account does not have an active MINDLOCK role.');
+  if (!employeeRole) throw new Error('This account does not have an active LOCTIV role.');
   const profiles = await restRequest(`profiles?id=eq.${extensionSession.user.id}&select=id,full_name,email&limit=1`);
   if (!profiles.length) throw new Error('Your account profile is not set up. Contact IT.');
   const employees = await restRequest(`employees?profile_id=eq.${extensionSession.user.id}&select=id,user_id,department,position,active&limit=1`);
@@ -223,8 +296,8 @@ async function loadAssignedDevice() {
       ? [assignedDevice.manufacturer, assignedDevice.model].filter(Boolean).join(' ') || assignedDevice.device_name || assignedDevice.operating_system || '—'
       : '—';
     updateDeviceStatus();
-    const heartbeatState = await extensionStorageGet('mindlock-extension-heartbeat-status');
-    renderHeartbeatStatus(heartbeatState['mindlock-extension-heartbeat-status']);
+    const heartbeatState = await extensionStorageGet(heartbeatStatusKey);
+    renderHeartbeatStatus(heartbeatState[heartbeatStatusKey]);
   } catch (error) {
     document.getElementById('endpointDevice').textContent = 'Unavailable';
     document.getElementById('endpointModel').textContent = '—';
@@ -578,6 +651,7 @@ async function openEmployeeTicket(ticketId) {
   const tickets = await restRequest(`tickets?id=eq.${ticketId}&profile_id=eq.${extensionSession.user.id}&select=id,ticket_number,subject,issue_category,status,description,priority,created_at,updated_at&limit=1`);
   if (!tickets.length) throw new Error('Ticket was not found or is not available to your account.');
   activeTicket = tickets[0];
+  document.getElementById('myTicketsListCard').classList.add('hidden');
   document.getElementById('employeeTicketDetail').classList.remove('hidden');
   document.getElementById('employeeTicketInfo').innerHTML = `
     <h3>${escapeHtml(activeTicket.ticket_number)} · ${escapeHtml(activeTicket.subject)}</h3>
@@ -587,6 +661,17 @@ async function openEmployeeTicket(ticketId) {
   await loadEmployeeConversation();
   if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
   ticketRealtimeTimer = setInterval(loadEmployeeConversation, 10000);
+}
+
+async function openTicketFromNotification() {
+  const ticketId = new URLSearchParams(window.location.search).get('ticketId');
+  if (!ticketId) return;
+  if (!/^[0-9a-f-]{36}$/i.test(ticketId)) {
+    throw new Error('The ticket link is invalid.');
+  }
+  await switchExtensionView('myTicketsView');
+  await openEmployeeTicket(ticketId);
+  document.getElementById('employeeTicketDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function loadEmployeeConversation() {
@@ -697,7 +782,7 @@ async function uploadTicketAttachment(ticketId, messageId, file) {
 }
 
 async function createSignedAttachmentUrl(path) {
-  const config = globalThis.MINDLOCK_CONFIG;
+  const config = globalThis.LOCTIV_CONFIG;
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const response = await fetch(`${config.supabaseUrl.replace(/\/$/, '')}/storage/v1/object/sign/ticket-attachments/${encodedPath}`, {
     method: 'POST',
@@ -887,6 +972,14 @@ async function showEmployeeApp() {
     }
   }
   await loadMyTickets();
+  try {
+    await openTicketFromNotification();
+  } catch (error) {
+    const state = document.getElementById('myTicketsState');
+    state.textContent = `Could not open the ticket from this notification: ${error.message}`;
+    state.classList.remove('hidden');
+    state.classList.add('error-text');
+  }
   if (ticketRefreshTimer) clearInterval(ticketRefreshTimer);
   ticketRefreshTimer = setInterval(refreshEmployeeApp, 30000);
 }
@@ -919,8 +1012,27 @@ async function switchExtensionView(viewId) {
 
 async function initPopup() {
   renderExtensionReleaseVersion();
-  const theme = await extensionStorageGet('mindlock-extension-theme');
-  setExtensionTheme(theme['mindlock-extension-theme'] || 'light');
+  const isTicketDeepLink = Boolean(new URLSearchParams(window.location.search).get('ticketId'));
+  document.documentElement.classList.toggle('ticket-deep-link', isTicketDeepLink);
+  document.body.classList.toggle('ticket-deep-link', isTicketDeepLink);
+  await migrateLegacyExtensionStorage();
+  const theme = await extensionStorageGet(extensionThemeKey);
+  setExtensionTheme(theme[extensionThemeKey] || 'light');
+  const updateLogs = document.getElementById('extensionUpdateLogs');
+  document.getElementById('extensionReleaseVersion').addEventListener('click', () => {
+    updateLogs.classList.remove('hidden');
+    document.getElementById('closeExtensionUpdateLogs').focus();
+  });
+  document.getElementById('closeExtensionUpdateLogs').addEventListener('click', () => updateLogs.classList.add('hidden'));
+  updateLogs.addEventListener('click', (event) => {
+    if (event.target === updateLogs) updateLogs.classList.add('hidden');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !updateLogs.classList.contains('hidden')) {
+      updateLogs.classList.add('hidden');
+      document.getElementById('extensionReleaseVersion').focus();
+    }
+  });
   document.getElementById('themeToggle').addEventListener('click', () => setExtensionTheme(employeeTheme === 'dark' ? 'light' : 'dark'));
   document.getElementById('extensionLoginForm').addEventListener('submit', signInEmployee);
   const passwordInput = document.getElementById('extensionPassword');
@@ -937,12 +1049,13 @@ async function initPopup() {
   document.getElementById('reloadMyTicketsBtn').addEventListener('click', () => loadMyTickets());
   document.getElementById('clockInButton').addEventListener('click', clockIn);
   document.getElementById('clockOutButton').addEventListener('click', clockOut);
-  document.getElementById('extensionLogoutBtn').addEventListener('click', () => signOut());
+  document.getElementById('extensionLogoutBtn').addEventListener('click', handleExtensionSignOut);
   document.getElementById('employeeTicketBackBtn').addEventListener('click', () => {
     activeTicket = null;
     if (ticketRealtimeTimer) clearInterval(ticketRealtimeTimer);
     ticketRealtimeTimer = null;
     document.getElementById('employeeTicketDetail').classList.add('hidden');
+    document.getElementById('myTicketsListCard').classList.remove('hidden');
     loadMyTickets();
   });
   document.getElementById('reopenTicketBtn').addEventListener('click', async () => {
@@ -964,6 +1077,7 @@ async function initPopup() {
     try {
       await openEmployeeTicket(button.dataset.ticketId);
       state.textContent = '';
+      state.classList.add('hidden');
     } catch (error) {
       state.textContent = error.message;
       state.classList.add('error-text');

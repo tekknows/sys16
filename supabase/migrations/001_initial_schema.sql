@@ -1,4 +1,4 @@
--- MINDLOCK initial database schema
+-- LOCTIV initial database schema
 -- Purpose: create the core tables required by the admin dashboard, browser extension,
 -- and ticketing workflows. This is a starter migration intended for Supabase PostgreSQL.
 

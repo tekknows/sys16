@@ -44,6 +44,17 @@ body::-webkit-scrollbar {
   padding: 12px;
 }
 
+body.ticket-deep-link {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+body.ticket-deep-link .extension-conversation {
+  max-height: none;
+  overflow: visible;
+}
+
 .popup-header,
 .user-row,
 .summary-grid,
@@ -255,6 +266,69 @@ h1, h2 {
   border-radius: 999px;
   color: var(--text-soft);
   font-size: 0.72rem;
+}
+
+.release-version-button {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.release-version-button:hover,
+.release-version-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.extension-logs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.extension-logs-card {
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100vh - 28px));
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.extension-logs-card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.extension-logs-content {
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.extension-logs-content::-webkit-scrollbar {
+  display: none;
+}
+
+.extension-logs-content h3 {
+  margin: 18px 0 4px;
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
+.extension-logs-content p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
 }
 
 .icon-btn {

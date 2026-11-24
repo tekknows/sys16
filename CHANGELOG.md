@@ -1,6 +1,12 @@
 # Changelog
 
-## 1.2.12 - November 19, 2026
+## 1.2.5 - November 24, 2026
+
+- Rebranded the admin dashboard and employee extension consistently as LOCTIV.
+- Open the matching ticket conversation from extension ticket notifications.
+- Added an extension update-history dialog while keeping the latest release notes visible.
+
+## 1.2.2 - November 19, 2026
 
 - Open tickets from admin notifications and prevent employee replies or attachments after closure.
 - Register a laptop automatically when it is assigned, and show unassigned devices as unregistered.
@@ -11,7 +17,7 @@
 - Send employee analytics and device heartbeats every 30 seconds.
 - Refresh admin analytics when employee activity arrives and show monitoring status from the latest heartbeat.
 
-## 1.2.11 - November 18, 2026
+## 1.2.1 - November 18, 2026
 
 - Added per-employee website usage reporting for time spent, visits, and browser-reported transfer size.
 - Persisted extension usage tracking across service-worker restarts and attributed records to the signed-in employee.

@@ -1,4 +1,4 @@
--- MINDLOCK ticket conversations, status workflow, privacy controls, and usage data.
+-- LOCTIV ticket conversations, status workflow, privacy controls, and usage data.
 
 alter type public.ticket_status add value if not exists 'Assigned';
 alter type public.ticket_status add value if not exists 'Waiting for IT';
